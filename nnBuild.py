@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 df = pd.read_csv('mergedOnSpeed.csv')
 
 # Split data into features and target
-X = df.drop(columns=['speed', 'Unnamed: 0'])
+X = df.drop(columns=['speed', 'datetime'])
 y = df['speed']
 
 # Train-test split
@@ -40,7 +40,7 @@ print(f"Test Loss: {test_loss}, Test MAE: {test_mae}")
 
 # Predict on test data
 y_pred = model.predict(X_test_scaled)
-
+model.save('daytimeTempsHumSkyPressSpeed.keras')
 # Plot actual vs predicted values
 plt.scatter(y_test, y_pred)
 plt.xlabel('True Values')

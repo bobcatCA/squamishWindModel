@@ -16,7 +16,7 @@ y = df['speed']
 
 # Train-test split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=False)
-model = load_model('daytimeTempsSpeed.keras')
+model = load_model('daytimeTempsHumSkyPressSpeed.keras')
 
 # Normalize features
 scaler = StandardScaler()
