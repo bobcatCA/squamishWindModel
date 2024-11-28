@@ -1,13 +1,11 @@
 import pandas as pd
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Baseline, QuantileLoss
 from pytorch_forecasting.data import GroupNormalizer
-from pytorch_forecasting.metrics import MAE
-# from pytorch_lightning import Trainer
 from lightning.pytorch import Trainer
 
 # 1. Load your dataset
 df = pd.read_csv('mergedOnSpeed.csv')  # Assuming you have your data in a CSV
-data = df[:10000]
+data = df
 data['datetime'] = pd.to_datetime(data['datetime'])
 data = data.sort_values('datetime')
 data = data.drop(columns=['datetime'])
