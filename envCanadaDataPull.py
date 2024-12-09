@@ -12,7 +12,11 @@ import re
 # Van 51442
 # Whistler 43443 (missing cover), 52178 (day only) (x348, 47867
 # Lillooet 27388  (missing cover) (x955, 48308
-# Pemberton 536 (missing cover
+# Pemberton 536 (missing cover)
+# Entrance 132 no data
+# Bowser 141 no data
+# Cambbell 145 no data
+# Nanaimo 192 no data
 
 # Call Environment Canada API
 # Returns a dataframe of data
@@ -25,10 +29,14 @@ def getHourlyData(stationID, year, month):
 
 # stationID = 51442
 stations = {
-    "Vancouver" : 51442,
-    "Whistler": 52178,
-    "Pemberton": 536,
-    "Lillooet": 27388
+    # "Vancouver" : 51442,
+    # "Whistler": 52178,
+    # "Pemberton": 536,
+    # "Lillooet": 27388,
+    # "Victoria": 51337,
+    # "Ballenas": 138,
+    "Pam": 6817,
+    "Comox": 155
 }
 start_date = datetime.strptime('May2016', '%b%Y')
 end_date = datetime.strptime('Sep2024', '%b%Y')
