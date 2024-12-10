@@ -17,10 +17,14 @@ y_rangeWind = {
     "Direction": df['direction']
 }
 
+y_rangeTemp = {
+    "Comox_Temperature": df['comoxDegC'],
+    "Pam_Temperature": df['pamDegC']
+}
+
 y_rangeWeather = {
     "Comox_Barometric": df['comoxKPa'],
     "Pam_Barometric": df['pamKPa'],
-    "Ballenas_Barometric": df['ballenasKPa']
 }
 
 fig, axs = plt.subplots(3, 1, sharex=True)
@@ -32,6 +36,10 @@ for series in y_rangeWind:
     else: plotNumber = 0
 
     axs[plotNumber].plot(x_range, y_rangeWind[series], label=series)
+    pass
+
+for series in y_rangeTemp:
+    axs[0].plot(x_range, y_rangeTemp[series], label=series)
     pass
 
 for series in y_rangeWeather:
