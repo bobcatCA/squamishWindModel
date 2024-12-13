@@ -15,102 +15,78 @@ data['static'] = 'S'
 
 # Add a time index column required for TimeSeriesDataSet
 data['time_idx'] = np.arange(data.shape[0])
+# data['weights'] = 1.0
 
 # 2. Split the data into training and validation
-max_encoder_length = 30  # Number of past observations
-max_prediction_length = 20  # Number of future steps you want to predict
+max_encoder_length = 10  # Number of past observations
+max_prediction_length = 5  # Number of future steps you want to predict
 training_cutoff = data['time_idx'].max() - max_prediction_length
 
-# Define the features and labels
-model_features = ['comoxDegC', 'comoxKPa','lillooetDegC', 'lillooetKPa',
-                  'pamDegC', 'pamKPa', 'pembertonDegC', 'pembertonKPa',
-                  'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'whistlerKPa']
-model_labels = ['speed', 'gust', 'lull', 'direction']
+training_features = ['vancouverDegC', 'whistlerDegC', 'pembertonDegC', 'lillooetDegC']
+# training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets
+training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets
+df_predictions = pd.DataFrame()
 
-# Define the normalizer for all the different variables:
-target_normalizer = MultiNormalizer([
-    GroupNormalizer(groups=["static"], transformation="softplus"),  # For 'speed'
-    GroupNormalizer(groups=["static"], transformation="softplus"),  # For 'gust'
-    GroupNormalizer(groups=["static"], transformation="softplus"),  # For 'lull'
-    GroupNormalizer(groups=["static"], transformation="softplus"),  # For 'direction'
-])
+for training_label in training_labels:
+    tft_checkpoint_filename = 'tft' + training_label + 'Checkpoint.ckpt'
 
-# 3. Define the TimeSeriesDataSet
-prediction_dataset = TimeSeriesDataSet(
-    data,
-    time_idx="time_idx",
-    target=model_labels,
-    group_ids=["static"],  # 'static' column for grouping
-    static_categoricals=["static"],  # Encoding the 'static' column
-    time_varying_known_reals=model_features,
-    time_varying_unknown_reals=model_labels,  # Our target variable 'speed'
-    min_encoder_length=max_encoder_length,
-    max_encoder_length=max_encoder_length,
-    min_prediction_length=max_prediction_length,
-    max_prediction_length=max_prediction_length,
-    target_normalizer=target_normalizer,  # Normalize target (speed)
-    add_relative_time_idx=False,
-    add_target_scales=True,
-    randomize_length=None,
-)
+    # Define the TimeSeriesDataSet
+    prediction_dataset = TimeSeriesDataSet(
+        data,
+        time_idx="time_idx",
+        # target=training_labels,
+        target=training_label,
+        group_ids=["static"],  # 'static' column for grouping
+        static_categoricals=["static"],  # Encoding the 'static' column
+        time_varying_known_reals=training_features,
+        time_varying_unknown_reals=[training_label],  # Our target variable 'speed'
+        # time_varying_unknown_reals=training_labels,
+        min_encoder_length=max_encoder_length,
+        max_encoder_length=max_encoder_length,
+        min_prediction_length=max_prediction_length,
+        max_prediction_length=max_prediction_length,
+        # target_normalizer=MultiNormalizer([GroupNormalizer(groups=["static"])] * len(training_labels)),
+        target_normalizer=GroupNormalizer(groups=['static']),
+        add_relative_time_idx=False,
+        add_target_scales=True,
+        randomize_length=None,
+        # weights='weights'
+    )
 
-batch = prediction_dataset.to_dataloader(train=False, batch_size=len(prediction_dataset), shuffle=False)
+    batch = prediction_dataset.to_dataloader(train=False, batch_size=len(prediction_dataset), shuffle=False)
 
-# Step 3: Load the pre-trained model
-tft = TemporalFusionTransformer.load_from_checkpoint('tftSquamish_gen2.ckpt')
+    # Load the pre-trained model
+    tft = TemporalFusionTransformer.load_from_checkpoint(tft_checkpoint_filename)
 
-# Predict using the model
-# raw_predictions, x = tft.predict(batch, mode="raw", return_x=True)
-raw_predictions = tft.predict(batch, mode='raw', return_x=True)
+    # Predict using the model
+    # raw_predictions, x = tft.predict(batch, mode="raw", return_x=True)
+    raw_predictions = tft.predict(batch, mode='raw', return_x=True)
+    df_predictions[training_label] = raw_predictions.output.prediction[:, 0, 0]
 
-y_pred_speed = raw_predictions.output.prediction[0][:, 0, 0]  # You can get a Gaussian distr. of points for each stamp by indexing
-y_pred_gust = raw_predictions.output.prediction[1][:, 0, 0]
-y_pred_lull = raw_predictions.output.prediction[2][:, 0, 0]
-y_pred_direction = raw_predictions.output.prediction[3]
+    pass
+# y_pred_gust = raw_predictions.output.prediction[1][:, 0, 0]
+# y_pred_lull = raw_predictions.output.prediction[2][:, 0, 0]
+# y_pred_direction = raw_predictions.output.prediction[3][:, 0, 0]
 x_pred = raw_predictions.x['decoder_time_idx'][:, 0]
 x_meas = data['time_idx']
 y_meas_speed = data['speed']
+y_pred_speed = df_predictions['speed']
 y_meas_gust = data['gust']
+y_pred_gust = df_predictions['gust']
 y_meas_lull = data['lull']
+y_pred_lull = df_predictions['lull']
 y_meas_direction = data['direction']
+y_pred_direction = df_predictions['direction']
 
-fig, axs = plt.subplots(4, 1, sharex=True)
-# ax.plot(x_meas, y_meas, label='Measured')
-# ax.plot(x_pred, y_pred, label='Predicted')
-axs[0].plot(date_series, y_meas_speed, label='Measured')
-axs[0].plot(date_series.loc[max_encoder_length:len(data) - max_prediction_length], y_pred_speed, label='Speed-Pred')
-axs[1].plot(date_series, y_meas_gust, label='Measured')
-axs[1].plot(date_series.loc[max_encoder_length:len(data) - max_prediction_length], y_pred_gust, label='Gust-Pred')
-axs[2].plot(date_series, y_meas_lull, label='Measured')
-axs[2].plot(date_series.loc[max_encoder_length:len(data) - max_prediction_length], y_pred_lull, label='Lull-Pred')
-axs[3].plot(date_series, y_meas_direction, label='Measured')
-axs[3].plot(date_series.loc[max_encoder_length:len(data) - max_prediction_length], y_pred_lull, label='Direction-Pred')
+fig, ax = plt.subplots(4, 1, sharex=True)
+ax[0].plot(x_meas, y_meas_speed, label='Measured')
+ax[0].plot(x_pred, y_pred_speed, label='Predicted')
+ax[1].plot(x_meas, y_meas_gust, label='Measured')
+ax[1].plot(x_pred, y_pred_gust, label='Predicted')
+ax[2].plot(x_meas, y_meas_lull, label='Measured')
+ax[2].plot(x_pred, y_pred_lull, label='Predicted')
+ax[3].plot(x_meas, y_meas_direction, label='Measured')
+ax[3].plot(x_pred, y_pred_direction, label='Predicted')
 # plt.ylabel('Wind Speed (knots)')
 plt.legend()
 plt.show()
-
-######################################
-# # Now show the Vanilla Net result
-# from sklearn.preprocessing import StandardScaler
-# from tensorflow.keras.models import load_model
-#
-# # Split data into features and target
-# y = data['speed']
-# X = data.drop(columns=['speed', 'static', 'time_idx'])
-#
-# # Load the pre-trained model
-# model = load_model('daytimeTempsHumSkyPressSpeed.keras')
-#
-# # Normalize features
-# scaler = StandardScaler()
-# X_test_scaled = scaler.fit_transform(X)
-#
-# # Run model to predict
-# y_pred = model.predict(X_test_scaled)
-#
-# # Now do the plotting
-# ax.plot(date_series, y_pred, label='Predicted_NN-Vanilla')
-# plt.ylabel('Wind Speed (knots)')
-# plt.legend()
-# plt.show()
-
