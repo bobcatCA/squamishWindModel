@@ -23,8 +23,9 @@ y_rangeTemp = {
 }
 
 y_rangeWeather = {
-    "Comox_Barometric": df['comoxKPa'],
-    "Pam_Barometric": df['pamKPa'],
+    # "Comox_Barometric": df['comoxKPa'],
+    # "Pam_Barometric": df['pamKPa'],
+    'Delta: Comox-Pam': df['comoxKPa'] - df['pamKPa']
 }
 
 fig, axs = plt.subplots(3, 1, sharex=True)
