@@ -5,19 +5,11 @@ from lightning.pytorch import Trainer
 import numpy as np
 
 # Load the dataset
-data = pd.read_csv('mergedOnSpeed.csv')  # Assuming you have your data in a CSV
-data = data[25720:30000]  # Drop the first bit, Pam rocks data missing and important
-
-# Pre-Processing
-# data['pamKPa'] = data['pamKPa'].fillna()  # Pam Rocks was missing a few points at the start
-
-# Add date-features. NOTE: year_fraction approximates assuming a month has 30.416 days. Should be close enough
-data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
-data['day_fraction'] = (data['time'] - data['time'].dt.normalize()).dt.total_seconds() / 86400  # Add as a categorical feature
-data['month'] = data['time'].dt.month
-data['year_fraction'] = (pd.to_timedelta(data['month'] * 30.416, unit='D')).dt.days / 365
+data = pd.read_csv('mergedOnSpeed_hourly.csv')  # Assuming you have your data in a CSV
+# data = data[25720:175000]  # Drop the first bit, Pam rocks data missing and important
 
 # Process the timestamps: Sort, format, re-index, introduce static column
+data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
 data = data.sort_values('time')  # Sort chronologically (if not already)
 time_series = data['time'].reset_index(drop=True)  # Save for later, so we have a real time index to plot against
 data = data.drop(columns=['time'])  # Drop for feeding into training model (TODO: is this necessary?)
@@ -31,10 +23,11 @@ training_cutoff = data['time_idx'].max() - max_prediction_length
 
 # Build the variables that form the basis of the model architecture
 training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-training_features_reals = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
-                           'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'victoriaDegC', 'victoriaKPa',
-                           'day_fraction', 'year_fraction']
-training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
+training_features_reals_known = ['day_fraction', 'year_fraction']
+training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
+                           'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'victoriaDegC', 'victoriaKPa']
+training_labels = ['speed', 'gust_relative', 'lull_relative', 'direction']  # Multiple targets - have to make a model for each
+# training_labels = ['gust_relative', 'lull_relative', 'direction']  # Multiple targets - have to make a model for each
 
 # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
 # model, it seems like all the target parameters are just averaging together.
@@ -45,16 +38,17 @@ for training_label in training_labels:
         data[lambda x: x.time_idx <= training_cutoff],
         time_idx='time_idx',  # Must be index = 0, 1, 2, ..... , n
         target=training_label,
-        group_ids=['static'],  # Just a dummy for now - might add Month, Year, or some other categories
-        static_categoricals=['static'],  # TODO: is this required since the model doesn't depend on categoricals?
+        group_ids=['static'],  # Still not entirely sure how this feeds into the model
+        static_categoricals=['static'],  # Just a dummy set to have one static
         time_varying_unknown_categoricals=training_features_categorical,
-        time_varying_known_reals=training_features_reals,  # Real Inputs: temperature, presssure, humidity, etc.
-        time_varying_unknown_reals=[training_label],  # Target variable: speed, gust, lull, or direction
-        min_encoder_length=max_encoder_length,
+        time_varying_known_reals=training_features_reals_known,  # Real Inputs: temperature, presssure, humidity, etc.
+        time_varying_unknown_reals=([training_label] + training_features_reals_unknown),  # Target variable: speed, gust, lull, or direction
+        min_encoder_length=max_encoder_length // 2,  # Based on PyTorch example
         max_encoder_length=max_encoder_length,
         min_prediction_length=max_prediction_length,
         max_prediction_length=max_prediction_length,
         target_normalizer=GroupNormalizer(groups=['static']),  # groups argument only required if multiple categoricals
+        # allow_missing_timesteps=True,  # Comment out if not using groups
         add_relative_time_idx=True,  # This may or may not affect much
         add_target_scales=True,
         randomize_length=None
@@ -65,8 +59,8 @@ for training_label in training_labels:
 
     # Create PyTorch DataLoader for training and validation
     batch_size = 32  # Probably should be higher than 32
-    train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=7)
-    val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=7)
+    train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=2)
+    val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=2)
     loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
 
     # Define the Temporal Fusion Transformer model
@@ -94,7 +88,7 @@ for training_label in training_labels:
     trainer.fit(tft, train_dataloader, val_dataloader)
 
     # Save the model after training
-    checkpoint_filename = 'tft' + training_label + 'Checkpoint.ckpt'
+    checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint.ckpt'
     trainer.save_checkpoint(checkpoint_filename)
 
     pass

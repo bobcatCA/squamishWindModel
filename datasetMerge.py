@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 # Convert the Weather strings to numerics
@@ -66,7 +67,7 @@ df_features = df_features.merge(lillooetWeather[['Temp (\u00b0'+'C)', 'Stn Press
 df_features.rename(columns={'Temp (\u00b0'+'C)':'lillooetDegC', 'Stn Press (kPa)': 'lillooetKPa', 'Rel Hum (%)': 'lillooetHum'}, inplace=True)
 df_features = df_features.merge(pamWeather[['Temp (\u00b0'+'C)', 'Stn Press (kPa)', 'Rel Hum (%)']], how='inner', left_on='datetime', right_index=True)
 df_features.rename(columns={'Temp (\u00b0'+'C)':'pamDegC', 'Stn Press (kPa)': 'pamKPa', 'Rel Hum (%)': 'pamHum'}, inplace=True)
-df_features = df_features.merge(pamWeather[['Temp (\u00b0'+'C)', 'Stn Press (kPa)', 'Rel Hum (%)']], how='inner', left_on='datetime', right_index=True)
+df_features = df_features.merge(ballenasWeather[['Temp (\u00b0'+'C)', 'Stn Press (kPa)', 'Rel Hum (%)']], how='inner', left_on='datetime', right_index=True)
 df_features.rename(columns={'Temp (\u00b0'+'C)':'ballenasDegC', 'Stn Press (kPa)': 'ballenasKPa', 'Rel Hum (%)': 'ballenasHum'}, inplace=True)
 df_features['datetime'] = pd.to_datetime(df_features['datetime'])
 df_features.set_index('datetime', inplace=True)
@@ -74,45 +75,117 @@ df_features.set_index('datetime', inplace=True)
 # Merge the two datasets, interpolate for missing data
 # df_merged = pd.merge(df_features, df_squamishWind, left_on='datetime', right_on='time', how='outer')
 df_merged = pd.merge(df_features, df_squamishWind, left_index=True, right_index=True, how='outer')
-df_merged['vancouverDegC'] = df_merged['vancouverDegC'].interpolate(method='linear')
+# df_merged['vancouverDegC'] = df_merged['vancouverDegC'].interpolate(method='linear')
 # df_merged['vancouverSky'] = df_merged['vancouverSky'].interpolate(method='linear')
-df_merged['vancouverSky'] = df_merged['vancouverSky'].ffill()  # Fill in seems appropriate, gaps are small enough
-df_merged['vancouverHum'] = df_merged['vancouverHum'].interpolate(method='linear')
-df_merged['vancouverKPa'] = df_merged['vancouverKPa'].interpolate(method='linear')
-df_merged['whistlerDegC'] = df_merged['whistlerDegC'].interpolate(method='linear')
+# df_merged['vancouverSky'] = df_merged['vancouverSky'].ffill()  # Fill in seems appropriate, gaps are small enough
+# df_merged['vancouverHum'] = df_merged['vancouverHum'].interpolate(method='linear')
+# df_merged['vancouverKPa'] = df_merged['vancouverKPa'].interpolate(method='linear')
+# df_merged['whistlerDegC'] = df_merged['whistlerDegC'].interpolate(method='linear')
 # df_merged['whistlerSky'] = df_merged['whistlerSky'].interpolate(method='linear')
-df_merged['whistlerSky'] = df_merged['whistlerSky'].ffill()
+# df_merged['whistlerSky'] = df_merged['whistlerSky'].ffill()
+# df_merged['whistlerHum'] = df_merged['whistlerHum'].interpolate(method='linear')
+# df_merged['whistlerKPa'] = df_merged['whistlerKPa'].interpolate(method='linear')
+# df_merged['comoxDegC'] = df_merged['comoxDegC'].interpolate(method='linear')
+# df_merged['comoxSky'] = df_merged['comoxSky'].interpolate(method='linear')
+# df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
+# df_merged['comoxHum'] = df_merged['comoxHum'].interpolate(method='linear')
+# df_merged['comoxKPa'] = df_merged['comoxKPa'].interpolate(method='linear')
+# df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear')
+# df_merged['pembertonHum'] = df_merged['pembertonHum'].interpolate(method='linear')
+# df_merged['pembertonKPa'] = df_merged['pembertonKPa'].interpolate(method='linear')
+# df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear')
+# df_merged['lillooetHum'] = df_merged['lillooetHum'].interpolate(method='linear')
+# df_merged['lillooetKPa'] = df_merged['lillooetKPa'].interpolate(method='linear')
+# df_merged['ballenasDegC'] = df_merged['ballenasDegC'].interpolate(method='linear')
+# df_merged['ballenasHum'] = df_merged['ballenasHum'].interpolate(method='linear')
+# df_merged['ballenasKPa'] = df_merged['ballenasKPa'].interpolate(method='linear')
+# df_merged['pamDegC'] = df_merged['pamDegC'].interpolate(method='linear')
+# df_merged['pamHum'] = df_merged['pamHum'].interpolate(method='linear')
+# df_merged['pamKPa'] = df_merged['pamKPa'].interpolate(method='linear')
+# df_merged['victoriaDegC'] = df_merged['victoriaDegC'].interpolate(method='linear')
+# df_merged['victoriaHum'] = df_merged['victoriaHum'].interpolate(method='linear')
+# df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear')
+# df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
+
+#### Interpolate speed to match the weather data, then drop the missing rows
+df_merged['speed'] = df_merged['speed'].interpolate(method='linear')
+df_merged = df_merged.dropna(subset=['speed', 'vancouverDegC'])
+
+# Whistler is only missing data at night, so chose polynomial interpolation
+df_merged['whistlerDegC'] = df_merged['whistlerDegC'].interpolate(method='linear')
 df_merged['whistlerHum'] = df_merged['whistlerHum'].interpolate(method='linear')
 df_merged['whistlerKPa'] = df_merged['whistlerKPa'].interpolate(method='linear')
+
+# Lillooet is approx 5.1 kPa higher than Whistler, as an approximation. Similar for others.
+df_merged['lillooetKPa'] = df_merged['lillooetKPa'].fillna(df_merged['whistlerKPa'] + 5.1)
+df_merged['ballenasKPa'] = df_merged['ballenasKPa'].fillna(df_merged['victoriaKPa'])
+df_merged['comoxKPa'] = df_merged['comoxKPa'].fillna(df_merged['ballenasKPa'])
+df_merged['victoriaKPa'] = df_merged['victoriaKPa'].fillna(df_merged['comoxKPa'])
+df_merged['pamKPa'] = df_merged['pamKPa'].fillna(df_merged['comoxKPa'] + 0.23)
+df_merged['ballenasDegC'] = df_merged['ballenasDegC'].fillna(df_merged['pamDegC'])
+df_merged['pamDegC'] = df_merged['pamDegC'].fillna(df_merged['ballenasDegC'])
+df_merged['lillooetDegC'] = df_merged['lillooetDegC'].fillna(df_merged['pembertonDegC'] + 1.5)
+df_merged['pembertonDegC'] = df_merged['pembertonDegC'].fillna(df_merged['lillooetDegC'] - 1.5)
+
+# Interpolate a few that have a small number of missing points
 df_merged['comoxDegC'] = df_merged['comoxDegC'].interpolate(method='linear')
-# df_merged['comoxSky'] = df_merged['comoxSky'].interpolate(method='linear')
-df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
-df_merged['comoxHum'] = df_merged['comoxHum'].interpolate(method='linear')
-df_merged['comoxKPa'] = df_merged['comoxKPa'].interpolate(method='linear')
-df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear')
-df_merged['pembertonHum'] = df_merged['pembertonHum'].interpolate(method='linear')
-df_merged['pembertonKPa'] = df_merged['pembertonKPa'].interpolate(method='linear')
-df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear')
-df_merged['lillooetHum'] = df_merged['lillooetHum'].interpolate(method='linear')
-df_merged['lillooetKPa'] = df_merged['lillooetKPa'].interpolate(method='linear')
-df_merged['ballenasDegC'] = df_merged['ballenasDegC'].interpolate(method='linear')
-df_merged['ballenasHum'] = df_merged['ballenasHum'].interpolate(method='linear')
-df_merged['ballenasKPa'] = df_merged['ballenasKPa'].interpolate(method='linear')
-df_merged['pamDegC'] = df_merged['pamDegC'].interpolate(method='linear')
-df_merged['pamHum'] = df_merged['pamHum'].interpolate(method='linear')
-df_merged['pamKPa'] = df_merged['pamKPa'].interpolate(method='linear')
 df_merged['victoriaDegC'] = df_merged['victoriaDegC'].interpolate(method='linear')
+df_merged['vancouverHum'] = df_merged['vancouverHum'].interpolate(method='linear')
 df_merged['victoriaHum'] = df_merged['victoriaHum'].interpolate(method='linear')
-df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear')
+df_merged['vancouverKPa'] = df_merged['vancouverKPa'].interpolate(method='linear')
+df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear')  # A few still missing
+df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear')  # A few still missing
+df_merged['ballenasKPa'] = df_merged['ballenasKPa'].interpolate(method='linear')  # A few still missing
+df_merged['ballenasDegC'] = df_merged['ballenasDegC'].interpolate(method='linear')  # A few still missing
+df_merged['pamDegC'] = df_merged['pamDegC'].interpolate(method='linear')  # A few still missing
+
+# df_merged['comoxDegC'] = df_merged['comoxDegC'].interpolate(method='linear')
+# df_merged['comoxHum'] = df_merged['comoxHum'].interpolate(method='linear')
+# df_merged['comoxKPa'] = df_merged['comoxKPa'].interpolate(method='linear')
+# df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear', order=5)
+# df_merged['pembertonHum'] = df_merged['pembertonHum'].interpolate(method='linear', order=5)
+# df_merged['pembertonKPa'] = df_merged['pembertonKPa'].interpolate(method='linear', order=5)
+# df_merged['victoriaDegC'] = df_merged['victoriaDegC'].interpolate(method='linear', order=5)
+# df_merged['victoriaHum'] = df_merged['victoriaHum'].interpolate(method='linear', order=5)
+# df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear', order=5)
+# df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear', order=5)
+# df_merged['lillooetHum'] = df_merged['lillooetHum'].interpolate(method='linear', order=5)
+# df_merged['lillooetKPa'] = df_merged['lillooetKPa'].interpolate(method='linear', order=5)
+
+# Fill the sky condition columns with the previous known entry
+# Assumption is that the gaps are small enough
+df_merged['vancouverSky'] = df_merged['vancouverSky'].ffill()
+df_merged['whistlerSky'] = df_merged['whistlerSky'].ffill()
+df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
 df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
 
-# Drop unwanted columns and rows without any speed data
-# df_merged = df_merged.drop(['direction', 'gust', 'lull', 'temperature'], axis=1)
-df_merged = df_merged.dropna(subset=['speed'])
+# Add calculated values
+df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
+df_merged['month'] = df_merged.index.month
+df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit='D')).dt.days / 365
+
+# Add computed gust/lull, they may be easier features than absolute values.
+df_merged['gust_relative'] = df_merged['gust'] / df_merged['speed']  # Absolute gust wasn't as accurate, trying to predict relative to speed
+df_merged['lull_relative'] = df_merged['lull'] / df_merged['speed']  # Same thing with lull
+df_merged['gust_relative'] = df_merged['gust_relative'].replace([np.inf, -np.inf], 5)  # Dividing results in some inf values
+df_merged['lull_relative'] = df_merged['lull_relative'].replace([np.inf, -np.inf, np.nan], 0)
+df_merged['gust_relative'] = df_merged['gust_relative'].replace(np.nan, 0)  # and some NaN values
+
+# The weather columns have many values (eg. "Rain", "Rain Showers", "Ice pellets"). Reduce down.
+df_merged['vancouverSky'] = df_merged['vancouverSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
+df_merged['vancouverSky'] = df_merged['vancouverSky'].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*', 'Other', regex=True)
+df_merged['comoxSky'] = df_merged['comoxSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
+df_merged['comoxSky'] = df_merged['comoxSky'].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*', 'Other', regex=True)
+df_merged['victoriaSky'] = df_merged['victoriaSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
+df_merged['victoriaSky'] = df_merged['victoriaSky'].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*', 'Other', regex=True)
+df_merged['whistlerSky'] = df_merged['whistlerSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
+df_merged['whistlerSky'] = df_merged['whistlerSky'].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*', 'Other', regex=True)
+
+# Reset the index and sort alphabetically
 df_merged = df_merged.reset_index(names=['time'])
 df_merged = df_merged[sorted(df_merged.columns)]
 
 # Save to csv file
-df_merged.to_csv('mergedOnSpeed.csv')
+df_merged.to_csv('mergedOnSpeed_hourly.csv')
 
 
