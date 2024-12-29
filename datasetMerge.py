@@ -107,11 +107,14 @@ df_merged = pd.merge(df_features, df_squamishWind, left_index=True, right_index=
 # df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear')
 # df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
 
-#### Interpolate speed to match the weather data, then drop the missing rows
-df_merged['speed'] = df_merged['speed'].interpolate(method='linear')
+# Interpolate speed to match the weather data, then drop the missing rows
+df_merged['speed'] = df_merged['speed'].interpolate(method='linear', limit=20)
+df_merged['gust'] = df_merged['gust'].interpolate(method='linear', limit=20)
+df_merged['lull'] = df_merged['lull'].interpolate(method='linear', limit=20)
+df_merged['direction'] = df_merged['direction'].interpolate(method='linear', limit=20)
 df_merged = df_merged.dropna(subset=['speed', 'vancouverDegC'])
 
-# Whistler is only missing data at night, so chose polynomial interpolation
+# Whistler is only missing data at night, so interpolation should be OK
 df_merged['whistlerDegC'] = df_merged['whistlerDegC'].interpolate(method='linear')
 df_merged['whistlerHum'] = df_merged['whistlerHum'].interpolate(method='linear')
 df_merged['whistlerKPa'] = df_merged['whistlerKPa'].interpolate(method='linear')
@@ -167,9 +170,11 @@ df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit=
 # Add computed gust/lull, they may be easier features than absolute values.
 df_merged['gust_relative'] = df_merged['gust'] / df_merged['speed']  # Absolute gust wasn't as accurate, trying to predict relative to speed
 df_merged['lull_relative'] = df_merged['lull'] / df_merged['speed']  # Same thing with lull
-df_merged['gust_relative'] = df_merged['gust_relative'].replace([np.inf, -np.inf], 5)  # Dividing results in some inf values
+df_merged['gust_relative'] = df_merged['gust_relative'].replace([np.inf, -np.inf], 3)  # Dividing results in some inf values
 df_merged['lull_relative'] = df_merged['lull_relative'].replace([np.inf, -np.inf, np.nan], 0)
 df_merged['gust_relative'] = df_merged['gust_relative'].replace(np.nan, 0)  # and some NaN values
+df_merged['gust_relative'] = df_merged['gust_relative'].clip(lower=1, upper=3, axis=0)  # Assume gust is only ever 3x wind speed
+df_merged['lull_relative'] = df_merged['lull_relative'].clip(lower=0, upper=1, axis=0)  # Similarly, 0 < lull < 1
 
 # The weather columns have many values (eg. "Rain", "Rain Showers", "Ice pellets"). Reduce down.
 df_merged['vancouverSky'] = df_merged['vancouverSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
