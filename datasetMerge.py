@@ -112,6 +112,7 @@ df_merged['speed'] = df_merged['speed'].interpolate(method='linear', limit=20)
 df_merged['gust'] = df_merged['gust'].interpolate(method='linear', limit=20)
 df_merged['lull'] = df_merged['lull'].interpolate(method='linear', limit=20)
 df_merged['direction'] = df_merged['direction'].interpolate(method='linear', limit=20)
+df_merged['temperature'] = df_merged['temperature'].interpolate(method='linear', limit=20)
 df_merged = df_merged.dropna(subset=['speed', 'vancouverDegC'])
 
 # Whistler is only missing data at night, so interpolation should be OK

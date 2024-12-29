@@ -1,5 +1,5 @@
 import pandas as pd
-from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, RMSE
+from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, RMSE, QuantileLoss
 from pytorch_forecasting.data import GroupNormalizer
 from lightning.pytorch import Trainer
 import numpy as np
@@ -40,8 +40,8 @@ data['static'] = 'S'  # Put a static data column into the df (required for train
 data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
 # Split the data into training and validation
-max_encoder_length = 20  # Number of past observations
-max_prediction_length = 5  # Number of future steps you want to predict
+max_encoder_length = 50  # Number of past observations
+max_prediction_length = 8  # Number of future steps you want to predict
 training_cutoff = data['time_idx'].max() - max_prediction_length
 
 # Build the variables that form the basis of the model architecture
@@ -49,8 +49,7 @@ training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whi
 training_features_reals_known = ['day_fraction', 'year_fraction']
 training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
-# training_labels = ['speed', 'gust_relative', 'lull_relative', 'direction']  # Multiple targets - have to make a model for each
-training_labels = ['direction']
+training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
 
 # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
 # model, it seems like all the target parameters are just averaging together.
@@ -84,7 +83,8 @@ for training_label in training_labels:
     batch_size = 32
     train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=2)
     val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=2)
-    loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
+    # loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
+    loss_func = QuantileLoss()
     # loss_func = WeightedMSELoss(weights_func=custom_weights)
 
     # Define the Temporal Fusion Transformer model
@@ -95,7 +95,8 @@ for training_label in training_labels:
         attention_head_size=4,
         dropout=0.2,
         hidden_continuous_size=4,
-        output_size=1,  # Will be 1 (not using quintiles)
+        # output_size=1,  # Will be 1 (not using quintiles)
+        output_size=7,
         loss=loss_func,
         log_interval=10,
         reduce_on_plateau_patience=4,
