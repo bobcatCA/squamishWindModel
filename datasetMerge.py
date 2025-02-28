@@ -164,7 +164,8 @@ df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
 df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
 
 # Add calculated values
-df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
+# df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
+df_merged['sin_hour'] = np.sin(2 * np.pi * df_merged.index.hour / 24)
 df_merged['month'] = df_merged.index.month
 df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit='D')).dt.days / 365
 

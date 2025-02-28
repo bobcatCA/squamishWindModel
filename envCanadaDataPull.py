@@ -29,17 +29,17 @@ def getHourlyData(stationID, year, month):
 
 # stationID = 51442
 stations = {
-    # "Vancouver" : 51442,
-    # "Whistler": 52178,
-    # "Pemberton": 536,
-    # "Lillooet": 27388,
-    # "Victoria": 51337,
-    # "Ballenas": 138,
+    "Vancouver" : 51442,
+    "Whistler": 52178,
+    "Pemberton": 536,
+    "Lillooet": 27388,
+    "Victoria": 51337,
+    "Ballenas": 138,
     "Pam": 6817,
     "Comox": 155
 }
-start_date = datetime.strptime('May2016', '%b%Y')
-end_date = datetime.strptime('Sep2024', '%b%Y')
+start_date = datetime.strptime('Feb2025', '%b%Y')
+end_date = datetime.strptime('Mar2025', '%b%Y')
 
 # Loop through the stations and gather data for the last 8 years
 for station, id in stations.items():
@@ -53,7 +53,8 @@ for station, id in stations.items():
     weather_data = pd.concat(frames)
     weather_data['Date/Time (LST)'] = pd.to_datetime(weather_data['Date/Time (LST)'])
     weather_data['Temp (°C)'] = pd.to_numeric(weather_data['Temp (°C)'])
-    weather_data.to_csv(filename)
+    print(weather_data['Date/Time (LST)'].loc[weather_data['Rel Hum (%)'].last_valid_index()])
+    # weather_data.to_csv(filename)
 
 # Plot to show
 # sns.set_style('whitegrid')

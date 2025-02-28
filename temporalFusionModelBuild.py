@@ -3,33 +3,9 @@ from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, RM
 from pytorch_forecasting.data import GroupNormalizer
 from lightning.pytorch import Trainer
 import numpy as np
-# from torchmetrics import Metric
-# import torch
-#
-# # Define custom weighted Loss Function
-# class WeightedMSELoss(Metric):
-#     def __init__(self, weights_func):
-#         super().__init__()
-#         self.weights_func = weights_func
-#         self.add_state("sum_loss", default=torch.tensor(0.0), dist_reduce_fx="sum")
-#         self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
-#
-#     def update(self, y_pred, y_true):
-#         weights = self.weights_func(y_true)
-#         loss = torch.mean(weights * (y_pred - y_true) ** 2)
-#         self.sum_loss += loss * len(y_true)
-#         self.total += len(y_true)
-#
-#     def compute(self):
-#         return self.sum_loss / self.total
-#
-# def custom_weights(targets):
-#     # Higher weights for high wind speeds
-#     return 1 - 0.9 * (targets > 280) - 0.9 * (targets < 230)  # For direction
 
-# Load the dataset
 data = pd.read_csv('mergedOnSpeed_hourly.csv')  # Assuming you have your data in a CSV
-data = data[20000:26599]  # Subset to reduce compute time
+# data = data[20000:26599]  # Subset to reduce compute time
 
 # Process the timestamps: Sort, format, re-index, introduce static column
 data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
@@ -46,9 +22,12 @@ training_cutoff = data['time_idx'].max() - max_prediction_length
 
 # Build the variables that form the basis of the model architecture
 training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-training_features_reals_known = ['day_fraction', 'year_fraction']
-training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
-                           'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
+# training_features_reals_known = ['day_fraction', 'year_fraction']
+training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+                                 'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
+# training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
+#                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
+training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
 
 # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
@@ -62,10 +41,10 @@ for training_label in training_labels:
         target=training_label,
         group_ids=['static'],  # Still not entirely sure how this feeds into the model
         static_categoricals=['static'],  # Just a dummy set to have one static
-        time_varying_unknown_categoricals=training_features_categorical,
+        time_varying_known_categoricals=training_features_categorical,
         time_varying_known_reals=training_features_reals_known,  # Real Inputs: temperature, presssure, humidity, etc.
         time_varying_unknown_reals=([training_label] + training_features_reals_unknown),  # Target variable: speed, gust, lull, or direction
-        min_encoder_length=max_encoder_length // 2,  # Based on PyTorch example
+        min_encoder_length=8,  # Based on PyTorch example
         max_encoder_length=max_encoder_length,
         min_prediction_length=max_prediction_length,
         max_prediction_length=max_prediction_length,
@@ -80,7 +59,7 @@ for training_label in training_labels:
     validation = TimeSeriesDataSet.from_dataset(training, data, predict=True, stop_randomization=True)
 
     # Create PyTorch DataLoader for training and validation
-    batch_size = 32
+    batch_size = 128
     train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=2)
     val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=2)
     # loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
@@ -90,8 +69,8 @@ for training_label in training_labels:
     # Define the Temporal Fusion Transformer model
     tft = TemporalFusionTransformer.from_dataset(
         training,
-        learning_rate=1e-2,
-        hidden_size=16,  # Size of the hidden layer
+        learning_rate=1e-3,
+        hidden_size=32,  # Size of the hidden layer
         attention_head_size=4,
         dropout=0.2,
         hidden_continuous_size=4,
@@ -100,13 +79,13 @@ for training_label in training_labels:
         loss=loss_func,
         log_interval=10,
         reduce_on_plateau_patience=4,
-        optimizer='adam'
+        # optimizer='adam'
     )
 
     # Wrap the model in a PyTorch Lightning Trainer
     trainer = Trainer(
         accelerator='cpu',
-        max_epochs=85,
+        max_epochs=10,
         gradient_clip_val=0.1
     )
 
@@ -114,8 +93,8 @@ for training_label in training_labels:
     trainer.fit(tft, train_dataloader, val_dataloader)
 
     # Save the model after training
-    checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint.ckpt'
-    trainer.save_checkpoint(checkpoint_filename)
+    checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint1.ckpt'
+    # trainer.save_checkpoint(checkpoint_filename)
 
     pass
 
