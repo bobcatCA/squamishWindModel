@@ -28,6 +28,7 @@ training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lill
 #                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
 training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
+data[training_features_reals_unknown] = np.nan
 
 df_predictions = pd.DataFrame()  # Store the predictions in the loop as columns in a df
 df_forecast = pd.DataFrame()  # Store the forecasts in the loop as columns in a df
