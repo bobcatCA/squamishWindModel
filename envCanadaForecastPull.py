@@ -1,6 +1,27 @@
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
+from thefuzz import process
+
+def find_best_name_match(target, list, prefer=None, threshold=80):
+    """
+    :param target: String, that you wish to find in a list of items
+    :param list: List in which you're looking to find the target
+    :param prefer: String, for potential multiple matches if another part in the string is preferred
+    :param threshold: Measure of match quality
+    :return: The matching value from the list, if it meets threshold
+    """
+    if prefer:
+        matches = process.extract(target, list, limit=2)  # Get top 2 matches
+
+        for match, score, in matches:
+            if prefer in match and score >= threshold:
+                return match
+            else:
+                return None
+    else:
+        match, score = process.extractOne(target, list)
+    return match if score >= threshold else None
 
 def pull_forecast():
     """
@@ -50,21 +71,35 @@ def pull_forecast():
                     except:  # TODO: Update. This should occur for all cases without cells that don't have a date/time value
                         print('Unknown table cell!')
 
-            # Format weather data into a dataframe
+            # Format weather data into a dataframe, rename columns to standard headings
             df_station = pd.DataFrame(rows, columns=headers)
-            df_station['Date/Time (PST)'] = pd.to_timedelta(df_station['Date/Time (PST)'] + ':00')
+            htmlNames = df_station.columns
+            htmlDate = find_best_name_match('Date', htmlNames)
+            htmlCondition = find_best_name_match('Condition', htmlNames)
+            htmlTemp = find_best_name_match('Temp', htmlNames, prefer='C')
+            htmlNames = [htmlDate, htmlCondition, htmlTemp]
+            newNames = ['datetime', f'{key}Sky', f'{key}DegC']
+            dictNames = dict(zip(htmlNames, newNames))
+            df_station = df_station.rename(columns=dictNames)
+            df_station['datetime'] = pd.to_timedelta(df_station['datetime'] + ':00')
 
             # Add day to the hour column
             df_dateIdx = pd.DataFrame(dayFirstIdx.items(), columns=['day', 'startIdx'])
             df_station = df_station.merge(df_dateIdx, left_on=df_station.index, right_on='startIdx', how='left')
             df_station['day'] = df_station['day'].ffill()
-            df_station['datetime'] = df_station['day'] + df_station['Date/Time (PST)']
-            df_station = df_station[['datetime', 'Temp. (\u00b0' + 'C)', 'Weather Conditions']]
+            df_station['datetime'] = df_station['day'] + df_station['datetime']
+            df_station = df_station[newNames]
+
+            # Convert to the proper type (numeric, string of standard categories)
+            df_station[f'{key}DegC'] = pd.to_numeric(df_station[f'{key}DegC'], errors='coerce')
+            # df_station[f'{key}KPa'] = pd.to_numeric(df_station[f'{key}KPa'], errors='coerce')
+            df_station[f'{key}Sky'] = df_station[f'{key}Sky'].replace(['Clear', 'Mainly Clear'],
+                                                                      'Fair')  # Clear and mainly clear should be similar
+            df_station[f'{key}Sky'] = df_station[f'{key}Sky'].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy|n/a$).*',
+                                                                      'Other', regex=True)
 
             # Merge multiple cities into the big dataframe
             df = df.merge(df_station, on='datetime', how='inner')
-            df = df.rename(columns={'Temp. (\u00b0'+'C)': f'{key}degC', 'Weather Conditions': f'{key}Sky'})
-            # df.drop(columns='Date/Time (PST)', inplace=True)
 
         else:  # If no response from URL get
             print('Error: invalid URL or no response')

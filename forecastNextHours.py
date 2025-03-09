@@ -5,17 +5,6 @@ from updateWeatherData import get_conditions_table
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Baseline, QuantileLoss
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 
-# Fetch data using HTML scrapers
-data = get_conditions_table()
-
-# Process the timestamps.
-data['time'] = pd.to_datetime(data['time'])
-data = data.sort_values('time')  # Sort chronologically (if not already)
-data = data.iloc[26700:28500]  # Narrow down the dataset to speed it up (for demonstration)
-data = data.reset_index(drop=True)  # Reset for indexing dates later
-data['static'] = 'S'  # Put a static data column into the df (required for training)
-data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
-
 # Set encoder/decoder lengths
 max_encoder_length = 50  # Number of past observations
 max_prediction_length = 8  # Number of future steps you want to predict
@@ -25,15 +14,16 @@ training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whi
 # training_features_reals_known = ['day_fraction', 'year_fraction']
 training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-# training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
-#                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
 training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
-data[training_features_reals_unknown] = np.nan
+
+# Fetch data using HTML scrapers
+data = get_conditions_table(training_labels, [*training_features_categorical, *training_features_reals_known])
+data['static'] = 'S'  # Put a static data column into the df (required for training)
+data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
 df_predictions = pd.DataFrame()  # Store the predictions in the loop as columns in a df
 df_forecast = pd.DataFrame()  # Store the forecasts in the loop as columns in a df
-# fig, ax = plt.subplots(4, 1, sharex=True)
 
 # Loop through each target variable and make a model for each
 for count, training_label in enumerate(training_labels):
@@ -67,7 +57,7 @@ for count, training_label in enumerate(training_labels):
     rawPredictions = tft.predict(batch, mode='raw', return_x=True)
     forecast_n = 4  # Plot the n hours ahead prediction
 
-    for idx in range(0, 2000, 24):  # plot some examples
+    for idx in range(0, 10, 10):  # plot some examples
         tft.plot_prediction(
             rawPredictions.x,
             rawPredictions.output,
@@ -75,9 +65,5 @@ for count, training_label in enumerate(training_labels):
             show_future_observed=True,
         )
         plt.show()
-    tft.plot_prediction(rawPredictions.x, rawPredictions.output, idx=80)
-    plt.show()
-    break
-
 pass
 
