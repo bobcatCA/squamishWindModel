@@ -38,9 +38,8 @@ def get_conditions_table(target_columns, known_columns, encoder_length=30, predi
     # There might be one row missing, due to an hour gap between observed and forecast. Interpolate/ffill
     # df[known_columns].iloc[:, 1:] = df[known_columns].iloc[:, 1:].apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
     df.loc[:, known_columns] = df.loc[:, known_columns].apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
-    df.dropna(axis=0, inplace=True)  # Drop missing rows at the start of the datset
+    df.dropna(axis=0, inplace=True, subset=known_columns)  # Drop missing rows at the start of the datset
     df.reset_index(drop=True, inplace=True)
-
 
     return df
 
