@@ -5,30 +5,30 @@ from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Ba
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 
 # Load and pre-process dataset
-data = pd.read_csv('mergedOnSpeed_hourly.csv')
-
-# Process the timestamps.
-data['time'] = pd.to_datetime(data['time'])
+data = pd.read_csv('mergedOnSpeed_daily.csv')  # Assuming you have your data in a CSV
+# data = data[20000:26599]  # Subset to reduce compute time
+data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
 data = data.sort_values('time')  # Sort chronologically (if not already)
-data = data.iloc[26700:28500]  # Narrow down the dataset to speed it up (for demonstration)
-data = data.reset_index(drop=True)  # Reset for indexing dates later
+
+# Put in extra required columns for TFT
 data['static'] = 'S'  # Put a static data column into the df (required for training)
 data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
+data = data.reset_index(drop=True)  # Reset for indexing dates later
 
 # Set encoder/decoder lengths
-max_encoder_length = 50  # Number of past observations
-max_prediction_length = 8  # Number of future steps you want to predict
+max_encoder_length = 8  # Number of past observations
+max_prediction_length = 5  # Number of future steps you want to predict
 
 # Build the variables that form the basis of the model architecture
 training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
 # training_features_reals_known = ['day_fraction', 'year_fraction']
-training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+training_features_reals_known = ['year_fraction', 'comoxDegC', 'lillooetDegC',
                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 # training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
 #                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
 training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
-training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
-data[training_features_reals_unknown] = np.nan
+training_labels = ['speed', 'speed_variability', 'dir_score']  # Multiple targets - have to make a model for each
+# data[training_features_reals_unknown] = np.nan
 
 df_predictions = pd.DataFrame()  # Store the predictions in the loop as columns in a df
 df_forecast = pd.DataFrame()  # Store the forecasts in the loop as columns in a df
@@ -36,7 +36,7 @@ df_forecast = pd.DataFrame()  # Store the forecasts in the loop as columns in a 
 
 # Loop through each target variable and make a model for each
 for count, training_label in enumerate(training_labels):
-    tft_checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint1.ckpt'
+    tft_checkpoint_filename = 'tft' + training_label + 'DailyCheckpoint.ckpt'
 
     # Define the TimeSeriesDataSet
     prediction_dataset = TimeSeriesDataSet(
@@ -48,9 +48,9 @@ for count, training_label in enumerate(training_labels):
         time_varying_known_categoricals=training_features_categorical,
         time_varying_known_reals=training_features_reals_known,  # Real Inputs: temperature, presssure, humidity, etc.
         time_varying_unknown_reals=([training_label] + training_features_reals_unknown),  # Target variable: speed, gust, lull, or direction
-        min_encoder_length=8,  # Based on PyTorch example
+        min_encoder_length=1,  # Based on PyTorch example
         max_encoder_length=max_encoder_length,
-        min_prediction_length=max_prediction_length,
+        min_prediction_length=1,
         max_prediction_length=max_prediction_length,
         target_normalizer=GroupNormalizer(groups=['static']),  # groups argument only required if multiple categoricals
         # allow_missing_timesteps=True,  # Comment out if not using groups
@@ -67,7 +67,7 @@ for count, training_label in enumerate(training_labels):
     rawPredictions = tft.predict(batch, mode='raw', return_x=True)
     forecast_n = 4  # Plot the n hours ahead prediction
 
-    for idx in range(0, 2000, 24):  # plot some examples
+    for idx in range(0, 200, 2):  # plot some examples
         tft.plot_prediction(
             rawPredictions.x,
             rawPredictions.output,
@@ -75,9 +75,9 @@ for count, training_label in enumerate(training_labels):
             show_future_observed=True,
         )
         plt.show()
-    tft.plot_prediction(rawPredictions.x, rawPredictions.output, idx=80)
-    plt.show()
-    break
+    # tft.plot_prediction(rawPredictions.x, rawPredictions.output, idx=80)
+    # plt.show()
+    # break
 
     # # Determine date ranges for measured, predicted, forecast
     # x_range_meas = data['time']

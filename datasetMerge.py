@@ -163,12 +163,6 @@ df_merged['whistlerSky'] = df_merged['whistlerSky'].ffill()
 df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
 df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
 
-# Add calculated values
-# df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
-df_merged['sin_hour'] = np.sin(2 * np.pi * df_merged.index.hour / 24)
-df_merged['month'] = df_merged.index.month
-df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit='D')).dt.days / 365
-
 # Add computed gust/lull, they may be easier features than absolute values.
 df_merged['gust_relative'] = df_merged['gust'] / df_merged['speed']  # Absolute gust wasn't as accurate, trying to predict relative to speed
 df_merged['lull_relative'] = df_merged['lull'] / df_merged['speed']  # Same thing with lull
@@ -177,6 +171,16 @@ df_merged['lull_relative'] = df_merged['lull_relative'].replace([np.inf, -np.inf
 df_merged['gust_relative'] = df_merged['gust_relative'].replace(np.nan, 0)  # and some NaN values
 df_merged['gust_relative'] = df_merged['gust_relative'].clip(lower=1, upper=3, axis=0)  # Assume gust is only ever 3x wind speed
 df_merged['lull_relative'] = df_merged['lull_relative'].clip(lower=0, upper=1, axis=0)  # Similarly, 0 < lull < 1
+
+# Add calculated values
+# df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
+df_merged['sin_hour'] = np.sin(2 * np.pi * df_merged.index.hour / 24)
+df_merged['month'] = df_merged.index.month
+df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit='D')).dt.days / 365
+df_merged['gustLull_index'] = (df_merged['gust_relative'] - 1) + (1 - df_merged['lull_relative'])
+# df_merged['datetime'] = pd.to_datetime(df_merged['datetime'])  # Ensure it's in DateTime format
+df_merged['date'] = df_merged.index.date
+df_merged['hour'] = df_merged.index.hour
 
 # The weather columns have many values (eg. "Rain", "Rain Showers", "Ice pellets"). Reduce down.
 df_merged['vancouverSky'] = df_merged['vancouverSky'].replace(['Clear', 'Mainly Clear'], 'Fair')  # Clear and mainly clear should be similar
