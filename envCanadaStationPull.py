@@ -41,7 +41,7 @@ def find_best_name_match(target, list, prefer=None, threshold=80):
     return match if score >= threshold else None
 
 
-def pull_past_24hrs():
+def pull_past_24hrs_weather():
     """
     :return: DataFrame containing time-series of past 24hrs of all weather stations
     """

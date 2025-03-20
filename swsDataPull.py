@@ -5,54 +5,78 @@ from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import time
 
-# Set up the WebDriver (e.g., for Chrome)
-# Make sure to provide the path to your Chrome WebDriver if necessary
-driver = webdriver.Chrome()
+def get_sws_df(dates):
+    # Set up the WebDriver (e.g., for Chrome)
+    # Make sure to provide the path to your Chrome WebDriver if necessary
+    driver = webdriver.Chrome()
+    # df = pd.DataFrame(columns=['datetime', 'speed', 'direction','gust', 'lull', 'temperature'])
+    first_date = True
+    df = None
+    for date in dates:
 
-startDate = pd.to_datetime('2016-09-21').date()
-endDate = pd.to_datetime('2024-09-10').date()
-date = startDate
+        string1 = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate='
+        string2 = '&reqtime=0'
+        # date = date + pd.Timedelta(days=1)
+        url = string1 + str(date) + string2
+        # Load the page
+        # url = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate=2024-09-10&reqtime=0'
+        driver.get(url)
 
-string1 = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate='
-string2 = '&reqtime=0'
+        # Allow time for the page to fully load
+        time.sleep(2)
 
-while date <= endDate:
+        # Grab the page source
+        page_source = driver.page_source
 
-    date = date + pd.Timedelta(days=1)
-    # Don't pull any data before May, or after September.
-    if date.month < 5 or date.month > 9:
-        continue
-    url = string1 + str(date) + string2
-    print(url)
-    # Load the page
-    # url = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate=2024-09-10&reqtime=0'
-    driver.get(url)
+        # Parse the page with BeautifulSoup
+        soup = BeautifulSoup(page_source, 'html.parser')
 
-    # Allow time for the page to fully load
-    time.sleep(2)
+        # Find the data related to the wind chart
+        # This will depend on how the data is structured on the page.
+        # For demonstration, I'm using a placeholder for the data extraction.
+        # Replace 'your_selector' with the actual selector used to target the chart data.
+        chart_data = driver.find_element(By.CSS_SELECTOR, 'body').text
+        if not chart_data.strip():
+            print(f'warning: empty chart data for {date}')
+        else:
+            try:
+                data_json = json.loads(chart_data)
+                if first_date:
+                    df = pd.DataFrame(data_json)
+                    first_date = False
+                else:
+                    df_date = pd.DataFrame(data_json)
+                    df = pd.concat([df, df_date])
 
-    # Grab the page source
-    page_source = driver.page_source
+                # with open(str(date) + '.json', 'w', encoding='utf-8') as f:
+                #     json.dump(data_json, f, ensure_ascii=False, indent=4)
+                #
+            except json.JSONDecodeError:
+                print(f'Error in {date} is not valid JSON format')
+        pass  # for loop
 
-    # Parse the page with BeautifulSoup
-    soup = BeautifulSoup(page_source, 'html.parser')
-
-    # Find the data related to the wind chart
-    # This will depend on how the data is structured on the page.
-    # For demonstration, I'm using a placeholder for the data extraction.
-    # Replace 'your_selector' with the actual selector used to target the chart data.
-    chart_data = driver.find_element(By.CSS_SELECTOR, 'body').text
-    if not chart_data.strip():
-        print(f'warning: empty chart data for {date}')
+    if df.empty:
+        pass
     else:
-        try:
-            data_json = json.loads(chart_data)
-            with open(str(date) + '.json', 'w', encoding='utf-8') as f:
-                json.dump(data_json, f, ensure_ascii=False, indent=4)
+        dict_names = {
+            'dt': 'datetime',
+            'ws': 'speed',
+            'wd': 'direction',
+            'wg': 'gust',
+            'wl': 'lull',
+            't': 'temperature'
+        }
+        df.rename(columns=dict_names, inplace=True)
+        df = df.apply(pd.to_numeric, errors='coerce')
+        df['datetime'] = pd.to_datetime(df['datetime'], unit='s')
+        df[['direction', 'gust', 'lull']] = df[['direction', 'gust', 'lull']].astype(float)
+        df.sort_values('datetime', inplace=True)
 
-        except json.JSONDecodeError:
-            print(f'Error in {date} is not valid JSON format')
+        # Close the WebDriver
+        driver.quit()
+    return df
+
+if __name__=='__main__':
+    # date_of_query = '2024-09-10'
+    # df_sws = get_sws_df(date_of_query)
     pass
-
-# Close the WebDriver
-driver.quit()
