@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from updateWeatherData import get_conditions_table
+from updateWeatherData import get_conditions_table_hourly
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Baseline, QuantileLoss, NaNLabelEncoder
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 
@@ -18,7 +18,7 @@ training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'p
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
 
 # Option 1: Fetch data using HTML scrapers
-data = get_conditions_table(training_labels, [*training_features_categorical, *training_features_reals_known])
+data = get_conditions_table_hourly(encoder_length=max_encoder_length, prediction_length=max_prediction_length)
 
 # Option 2: Use previous data
 # data = pd.read_csv('mergedOnSpeed_hourly.csv')
@@ -31,6 +31,8 @@ data = get_conditions_table(training_labels, [*training_features_categorical, *t
 data[training_features_reals_unknown] = data[training_features_reals_unknown].ffill()
 # data[training_labels] = data[training_labels].fillna(data[training_labels].mean())  # Replace NaNs with mean (or 0)
 data[training_labels] = data[training_labels].fillna(0)
+data.dropna(axis=0, inplace=True)
+data.reset_index(drop=True, inplace=True)
 
 # Now move on to feeding it into the Inference pass
 data['static'] = 'S'  # Put a static data column into the df (required for training)
@@ -79,15 +81,6 @@ for count, training_label in enumerate(training_labels):
     # Determine date ranges for measured, predicted, forecast
     x_range_meas = data['datetime']
     x_range_pred = data['datetime'][rawPredictions.index['time_idx']]
-    # x_range_forecast = data['time'][rawPredictions.x['decoder_time_idx'][:, forecast_n].numpy() - forecast_n]
-
-    # if 'speed' in training_label:
-    #     quantile_of_interest = 3  # Mean for speed
-    # elif 'gust' in training_label:
-    #     quantile_of_interest = 4  # Near high-end for gust
-    # elif 'lull in training_label':
-    #     quantile_of_interest = 2  # Near low-end for lull
-    # else: quantile_of_interest = np.nan
 
     # Determine the predicted/forecast (Mean = 3/7 Quantile)
     y_range_meas = data[training_label]
@@ -120,8 +113,7 @@ for count, training_label in enumerate(training_labels):
     ax[count].legend()
 pass
 
-# plt.show()
-# Calculate derived ratings
+# Calculate the Quality Ratings based on the predictions
 df_forecast['sailingWindow'] = df_forecast['speed'] > 15
 df_forecast['gustLullRating'] = (df_forecast['gust_Q7'] - df_forecast['gust_Q1'] +
                                  df_forecast['lull_Q7'] - df_forecast['lull_Q1'])
@@ -131,4 +123,5 @@ df_forecast['directionRating'] = df_forecast['direction_Q7'] - df_forecast['dire
 df_forecast['directionRating'] = 5 - 4 * ((df_forecast['directionRating'] - 40) / 50)
 df_forecast['directionRating'] = np.clip(round(df_forecast['directionRating']), 1, 5)
 
+df_forecast = df_forecast.groupby('datetime').mean()  # TFT outputs multiple predictions per stamp, take mean() for now.
 print('done')

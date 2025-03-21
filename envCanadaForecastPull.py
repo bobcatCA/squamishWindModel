@@ -1,3 +1,4 @@
+import datetime
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -23,7 +24,50 @@ def find_best_name_match(target, list, prefer=None, threshold=80):
         match, score = process.extractOne(target, list)
     return match if score >= threshold else None
 
-def pull_forecast():
+
+def pull_forecast_daily(time_range):
+    df = pd.DataFrame()
+    df['datetime'] = time_range
+
+    urls = {
+        'comox': 'https://weather.gc.ca/en/location/index.html?coords=49.674,-124.928',
+        'lillooet': 'https://weather.gc.ca/en/location/index.html?coords=50.694,-121.939',
+        'pemberton': 'https://weather.gc.ca/en/location/index.html?coords=50.317,-122.800',
+        'vancouver': 'https://weather.gc.ca/en/location/index.html?coords=49.245,-123.115',
+        'victoria': 'https://weather.gc.ca/en/location/index.html?coords=48.433,-123.362',
+        'whistler': 'https://weather.gc.ca/en/location/index.html?coords=50.117,-122.955',
+    }
+
+    current_year = datetime.date.today().year
+
+    for key, value in urls.items():
+        print(f'fetching dailys for {key}')
+        response = requests.get(value)
+        if response.status_code == 200:
+            # Find the forecast table, headers (dates), and contents
+            soup = BeautifulSoup(response.text, 'html.parser')
+            table = soup.find(attrs={'class': 'div-table'})
+            dates = pd.Series([col.text.strip() for col in table.find_all(attrs={'class': 'div-row div-row1 div-row-head'})])
+            forecast_data = pd.Series([col.text.strip() for col in table.find_all(attrs={
+                'class': ["div-row div-row2 div-row-data", "div-row div-row2 div-row-data linkdate"]})])
+            # forecast_data = table.find_all('div', attrs={'class': ["div-row div-row2 div-row-data", "div-row div-row2 div-row-data linkdate"]})
+            high_temps = forecast_data.str.extract(r'(\d+)(?=°)')
+            weather_conditions = forecast_data.str.extract(r'(?<=°C)\s*(.*)')
+
+            # Assemble into a dataframe
+            days = dates.str.extract(r'(\d+)')  # Extract numeric day
+            months = dates.str.extract(r'([A-Za-z]+)$')  # Extract month
+            df_station = pd.DataFrame()
+            df_station['datetime'] = days + ' ' + months + ' ' + str(current_year)
+            df_station['datetime'] = pd.to_datetime(df_station['datetime']) + pd.to_timedelta(14, 'hours')
+            df_station[f'{key}DegC'] = high_temps
+            df_station[f'{key}Sky'] = weather_conditions
+            df = df.merge(df_station, on='datetime', how='inner')
+
+    return df
+
+
+def pull_forecast_hourly():
     """
     :return: DataFrame, with the time-series forecast data for all stations
     """

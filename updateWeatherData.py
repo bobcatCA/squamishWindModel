@@ -1,15 +1,18 @@
 import numpy as np
 import pandas as pd
 import sqlite3
-from datetime import datetime, timedelta
-from envCanadaForecastPull import pull_forecast
+from datetime import timedelta
+from envCanadaForecastPull import pull_forecast_hourly, pull_forecast_daily
 from envCanadaStationPull import pull_past_24hrs_weather
 from swsDataPull import get_sws_df
+from transformDataDaily import add_scores_to_df
 
 def update_sql_db_hourly(df):
-    # Connect to the database and append new data
+    """
+    :param df: Pandas DataFrame, containing time-series weather station data
+    :return: None
+    """
     conn = sqlite3.connect('weather_data_hourly.db')
-    # cursor = conn.cursor()
 
     # Get existing table column names, keep only those matching, and commit.
     sql_columns = pd.read_sql("PRAGMA table_info(weather)", conn)['name'].tolist()
@@ -22,7 +25,7 @@ def update_sql_db_hourly(df):
             df[col] = np.nan
 
     df = df[sql_columns]  # Remove any columns from df that don't exist in SQL database
-    # df.loc[:, 'datetime'] = df['datetime'].astype(int)
+    # df.loc[:, 'datetime'] = df['datetime'].astype(int)  # TODO: Decide if the database should be Int timestamps or Y-m-d
     df["datetime"] = df["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # Convert DataFrame to a list of tuples
@@ -60,40 +63,84 @@ def update_sql_db_hourly(df):
     print(f"Inserted: {inserted_rows}")
     print(f"Ignored (duplicates): {ignored_rows}")
 
-    # # Append recent records to the database
-    # df.to_sql('weather', conn, if_exists='append', index=False, method='multi')
-    #
-    # # Remove duplicates if they exist
-    # cursor.execute("""
-    # DELETE FROM weather
-    # WHERE rowid NOT IN (
-    #     SELECT MIN(rowid)
-    #     FROM weather
-    #     GROUP BY datetime
-    # )
-    # """)
-
-
     return
 
 
-def get_conditions_table(target_columns, known_columns, encoder_length=30, prediction_length=8):
+def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     """
-    :return: DataFrame, Concat'd with observed values from the past 24hrs, and forecast hourly
+    :param encoder_length: Int, number of time steps to look back/encode
+    :param prediction_length: Int, number of time steps to predict/look forward
+    :return: DataFrame, Concat'd with observed values from the past/upcoming days
     """
-    # Pull the past and forecast data
-    df_weatherRecent = pull_past_24hrs_weather()
-    # df_weatherRecent = pd.DataFrame()  # TODO: DELETE
-    past24_dates = list(df_weatherRecent['datetime'].dt.date.unique().astype(str))
-    # df_sws = get_sws_df(past24_dates)
-    df_sws = get_sws_df(['2024-09-02', '2024-09-03'])
-    df_sws['datetime'] + pd.to_timedelta(198, 'days')
-    df_recent = pd.merge_asof(df_weatherRecent, df_sws, on='datetime', direction='nearest')
+    today_14 = pd.to_datetime(pd.Timestamp.now().date()) + pd.to_timedelta(14, 'hours')
+    startTime = today_14 - timedelta(days=encoder_length)
+    endTime = today_14 + timedelta(days=prediction_length)
+    timeValues = pd.date_range(start=startTime, end=endTime, freq='d')
+
+    # Get corresponding recent data from SQL server
+    conn = sqlite3.connect('weather_data_hourly.db')
+    df_recent = pd.read_sql('SELECT * FROM weather', conn)
+    df_recent['datetime'] = pd.to_datetime(df_recent['datetime'])
+
+    # TODO: Delete, once SWS is up and running
+    df_recent['direction'] = np.random.randint(50, 361, df_recent.shape[0])
+    df_recent['lull'] = np.random.randint(1, 25, df_recent.shape[0])
+    df_recent['gust'] = np.random.randint(1, 25, df_recent.shape[0])
+    df_recent['speed'] = np.random.randint(1, 25, df_recent.shape[0])
+
+    conn.close()
+
+    # Merge SQL data with desired date range
+    df = pd.DataFrame()
+    df['datetime'] = timeValues
+    df = df.merge(df_recent, on='datetime', how='left')
+
+    # Add in the Quality scores, these are daily labels to predict
+    df_ratings = add_scores_to_df(df_recent)
+    df = df.merge(df_ratings, on='datetime', how='left')
+
+    # Get forecast data from Environment Canada and concatenate
+    df_forecast = pull_forecast_daily(timeValues)
+    df = pd.concat([df, df_forecast])
+    df['year_fraction'] = ((df['datetime'].dt.month - 1) * 30.416 + df['datetime'].dt.day - 1) / 365
+
+    # Categorize weather columns into 'Fair', 'Mostly Cloudy', 'Cloudy', and 'Other'
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['Clear',
+                                                                                                   'Mainly Clear',
+                                                                                                   'Sunny'
+                                                                                                   ], 'Fair')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
+                                                                                                   'Partly cloudy',
+                                                                                                   'Mainly cloudy',
+                                                                                                   ], 'Mostly Cloudy')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
+                                                                                                   ], 'Mostly Cloudy')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*',
+                                                                                                  'Other', regex = True)
+
+    # Final cleaning/re-ordering
+    df.sort_values(by='datetime', inplace=True)
+    df.reset_index(inplace=True, drop=True)
+    return df
+
+
+def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
+    """
+    :param encoder_length: Int, number of time steps to look back/encode
+    :param prediction_length: Int, number of time steps to predict/look forward
+    :return: DataFrame, Concat'd with observed values from the past/upcomind days
+    """
+    # Pull the past and forecast data. Update the SQL database with recent data
+    df_weather_recent = pull_past_24hrs_weather()
+    past24_dates = list(df_weather_recent['datetime'].dt.date.unique().astype(str))
+    # df_sws = get_sws_df(past24_dates)  # TODO: uncomment v
+    df_sws = get_sws_df(['2024-09-02', '2024-09-03'])  # TODO: Erase this once SWS weather station is up and running
+    df_sws['datetime'] + pd.to_timedelta(198, 'days')  # TODO: Ditto
+    df_recent = pd.merge_asof(df_weather_recent, df_sws, on='datetime', direction='nearest')
     update_sql_db_hourly(df_recent)
 
-    df_forecast = pull_forecast()
-
-    # Put the two dataframes together
+    # Pull forecast data and put the two dataframes together
+    df_forecast = pull_forecast_hourly()
     df_data = pd.concat([df_forecast, df_recent], ignore_index=True, sort=False)
     df_data.sort_values(by='datetime', inplace=True)
     df_data.reset_index(drop=True, inplace=True)
@@ -110,17 +157,34 @@ def get_conditions_table(target_columns, known_columns, encoder_length=30, predi
 
     # Add calculated columns
     df['sin_hour'] = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
-    df['month'] = df['datetime'].dt.month
-    df['year_fraction'] = (pd.to_timedelta(df['month'] * 30.416, unit='D')).dt.days / 365
-    df.drop(columns=['month'], inplace=True)
+    df['year_fraction'] = ((df['datetime'].dt.month - 1) * 30.416 + df['datetime'].dt.day - 1) / 365
+
+    # Categorize weather columns into 'Fair', 'Mostly Cloudy', 'Cloudy', and 'Other'
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['Clear',
+                                                                                                   'Mainly Clear',
+                                                                                                   'Sunny'
+                                                                                                   ], 'Fair')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
+                                                                                                   'Partly cloudy',
+                                                                                                   'Mainly cloudy',
+                                                                                                   ], 'Mostly Cloudy')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
+                                                                                                   ], 'Mostly Cloudy')
+    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*',
+                                                                                                  'Other', regex = True)
 
     # There might be one row missing, due to an hour gap between observed and forecast. Interpolate/ffill
-    # df[known_columns].iloc[:, 1:] = df[known_columns].iloc[:, 1:].apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
-    df.loc[:, known_columns] = df.loc[:, known_columns].apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
-    df.dropna(axis=0, inplace=True, subset=known_columns)  # Drop missing rows at the start of the datset
+    # df.loc[:, known_columns] = df.loc[:, known_columns].apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
+    df = df.apply(lambda col: col.interpolate() if col.dtype.kind in 'biufc' else col.ffill())
+    df.sort_values(by='datetime', inplace=True)
     df.reset_index(drop=True, inplace=True)
-
     return df
 
 if __name__=='__main__':
+    # df = pd.read_csv('mergedOnSpeed_forSQL.csv')
+    # df['datetime'] = pd.to_datetime(df['datetime'])
+    # update_sql_db_hourly(df)
+
+    conn = sqlite3.connect('weather_data_hourly.db')
+    df_test = pd.read_sql('SELECT * FROM weather', conn)
     pass

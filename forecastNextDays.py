@@ -1,9 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from updateWeatherData import get_conditions_table
+import sqlite3
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Baseline, QuantileLoss, NaNLabelEncoder
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
+from updateWeatherData import get_conditions_table_daily
 
 # Set encoder/decoder lengths
 max_encoder_length = 8  # Number of past observations
@@ -12,31 +13,33 @@ max_prediction_length = 5  # Number of future steps you want to predict
 # Build the variables that form the basis of the model architecture
 training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
 # training_features_reals_known = ['day_fraction', 'year_fraction']
-training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+training_features_reals_known = ['year_fraction', 'comoxDegC', 'lillooetDegC',
                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'speed_variability', 'dir_score']  # Multiple targets - have to make a model for each
 
-# Option 1: Fetch data using HTML scrapers
-# data = get_conditions_table(training_labels, [*training_features_categorical, *training_features_reals_known])
+# Option 1: Fetch data using live database and HTML scrapers
+data = get_conditions_table_daily()
 
 # Option 2: Use previous data
-data = pd.read_csv('mergedOnSpeed_daily.csv')
-data['time'] = pd.to_datetime(data['time'])
-data = data.sort_values('time')  # Sort chronologically (if not already)
-data = data.iloc[1000:1030]  # Narrow down the dataset to speed it up (for demonstration)
-data.reset_index(inplace=True, drop=True)
-data.loc[data.index[-5:], training_features_reals_unknown] = np.nan
-data.loc[data.index[-5:], training_labels] = np.nan
+# data = pd.read_csv('mergedOnSpeed_daily.csv')
+# data['time'] = pd.to_datetime(data['time'])
+# data = data.sort_values('time')  # Sort chronologically (if not already)
+# data = data.iloc[1000:1030]  # Narrow down the dataset to speed it up (for demonstration)
+# data.reset_index(inplace=True, drop=True)
+# data.loc[data.index[-5:], training_features_reals_unknown] = np.nan
+# data.loc[data.index[-5:], training_labels] = np.nan
 data[training_features_reals_unknown] = data[training_features_reals_unknown].ffill()
 data[training_labels] = data[training_labels].fillna(0)
+data.dropna(axis=0, inplace=True)
+data.reset_index(drop=True, inplace=True)
 
 # Now move on to feeding it into the Inference pass
 data['static'] = 'S'  # Put a static data column into the df (required for training)
 data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
 df_forecast = pd.DataFrame()  # Store the forecasts in the loop as columns in a df
-df_forecast['date'] = data['date']
+df_forecast['datetime'] = data['datetime']
 
 # Loop through each target variable and make a model for each
 for count, training_label in enumerate(training_labels):
@@ -69,16 +72,16 @@ for count, training_label in enumerate(training_labels):
 
     # Predict using the pre-trained model
     rawPredictions = tft.predict(batch, mode='raw', return_index=True, return_x=True)
-    forecast_n = 4  # Plot the n hours ahead prediction
-    forecast_q = 4
+    forecast_n = 4  # n hours ahead prediction
+    forecast_q = 4  # q quantile (out of 0-7)
 
     # tft.plot_prediction(rawPredictions.x, rawPredictions.output,
     #                     idx=496, show_future_observed=True)
     # plt.show()
 
     # Determine date ranges for measured, predicted, forecast
-    x_range_meas = data['date']
-    x_range_pred = data['date'][rawPredictions.index['time_idx']]
+    x_range_meas = data['datetime']
+    x_range_pred = data['datetime'][rawPredictions.index['time_idx']]
 
     # Determine the predicted/forecast (Mean = 3/7 Quantile)
     y_range_meas = data[training_label]
@@ -87,30 +90,10 @@ for count, training_label in enumerate(training_labels):
 
     # Add to DataFrame
     df_target = pd.DataFrame()
-    df_target['date'] = x_range_pred
+    df_target['datetime'] = x_range_pred
     df_target[f'{training_label}'] = y_range_pred
-    df_target = df_target.groupby('date')[f'{training_label}'].mean()
-    df_forecast = df_forecast.merge(df_target, on='date', how='right')
+    df_target = df_target.groupby('datetime')[f'{training_label}'].mean()
+    df_forecast = df_forecast.merge(df_target, on='datetime', how='right')
 pass
 
-# fig, ax = plt.subplots(3, 1, sharex=True)
-#
-# data = pd.read_csv('mergedOnSpeed_daily.csv').iloc[1000:1030]
-# data['time'] = pd.to_datetime(data['time'])
-#
-# # Plot on the predicted mean for speed, variability, direction
-# ax[0].plot(data['date'], data['speed'], label='Measured')
-# ax[1].plot(data['date'], data['speed_variability'], label='Measured')
-# ax[2].plot(data['date'], data['dir_score'], label='Measured')
-#
-# ax[0].plot(df_forecast['date'], df_forecast['speed'], label='Predicted')
-# ax[1].plot(df_forecast['date'], df_forecast['speed_variability'], label='Predicted')
-# ax[2].plot(df_forecast['date'], df_forecast['dir_score'], label='Predicted')
-#
-# # Remaining plot settings
-# ax[0].legend()
-# ax[1].legend()
-# ax[2].legend()
-
-plt.show()
 print('done')

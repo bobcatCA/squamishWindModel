@@ -73,46 +73,21 @@ df_features['datetime'] = pd.to_datetime(df_features['datetime'])
 df_features.set_index('datetime', inplace=True)
 
 # Merge the two datasets, interpolate for missing data
-# df_merged = pd.merge(df_features, df_squamishWind, left_on='datetime', right_on='time', how='outer')
-df_merged = pd.merge(df_features, df_squamishWind, left_index=True, right_index=True, how='outer')
-# df_merged['vancouverDegC'] = df_merged['vancouverDegC'].interpolate(method='linear')
-# df_merged['vancouverSky'] = df_merged['vancouverSky'].interpolate(method='linear')
-# df_merged['vancouverSky'] = df_merged['vancouverSky'].ffill()  # Fill in seems appropriate, gaps are small enough
-# df_merged['vancouverHum'] = df_merged['vancouverHum'].interpolate(method='linear')
-# df_merged['vancouverKPa'] = df_merged['vancouverKPa'].interpolate(method='linear')
-# df_merged['whistlerDegC'] = df_merged['whistlerDegC'].interpolate(method='linear')
-# df_merged['whistlerSky'] = df_merged['whistlerSky'].interpolate(method='linear')
-# df_merged['whistlerSky'] = df_merged['whistlerSky'].ffill()
-# df_merged['whistlerHum'] = df_merged['whistlerHum'].interpolate(method='linear')
-# df_merged['whistlerKPa'] = df_merged['whistlerKPa'].interpolate(method='linear')
-# df_merged['comoxDegC'] = df_merged['comoxDegC'].interpolate(method='linear')
-# df_merged['comoxSky'] = df_merged['comoxSky'].interpolate(method='linear')
-# df_merged['comoxSky'] = df_merged['comoxSky'].ffill()
-# df_merged['comoxHum'] = df_merged['comoxHum'].interpolate(method='linear')
-# df_merged['comoxKPa'] = df_merged['comoxKPa'].interpolate(method='linear')
-# df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear')
-# df_merged['pembertonHum'] = df_merged['pembertonHum'].interpolate(method='linear')
-# df_merged['pembertonKPa'] = df_merged['pembertonKPa'].interpolate(method='linear')
-# df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear')
-# df_merged['lillooetHum'] = df_merged['lillooetHum'].interpolate(method='linear')
-# df_merged['lillooetKPa'] = df_merged['lillooetKPa'].interpolate(method='linear')
-# df_merged['ballenasDegC'] = df_merged['ballenasDegC'].interpolate(method='linear')
-# df_merged['ballenasHum'] = df_merged['ballenasHum'].interpolate(method='linear')
-# df_merged['ballenasKPa'] = df_merged['ballenasKPa'].interpolate(method='linear')
-# df_merged['pamDegC'] = df_merged['pamDegC'].interpolate(method='linear')
-# df_merged['pamHum'] = df_merged['pamHum'].interpolate(method='linear')
-# df_merged['pamKPa'] = df_merged['pamKPa'].interpolate(method='linear')
-# df_merged['victoriaDegC'] = df_merged['victoriaDegC'].interpolate(method='linear')
-# df_merged['victoriaHum'] = df_merged['victoriaHum'].interpolate(method='linear')
-# df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear')
-# df_merged['victoriaSky'] = df_merged['victoriaSky'].ffill()
+# df_merged = pd.merge(df_features, df_squamishWind, left_index=True, right_index=True, how='outer')
+df_merged = df_features
 
 # Interpolate speed to match the weather data, then drop the missing rows
-df_merged['speed'] = df_merged['speed'].interpolate(method='linear', limit=20)
-df_merged['gust'] = df_merged['gust'].interpolate(method='linear', limit=20)
-df_merged['lull'] = df_merged['lull'].interpolate(method='linear', limit=20)
-df_merged['direction'] = df_merged['direction'].interpolate(method='linear', limit=20)
-df_merged['temperature'] = df_merged['temperature'].interpolate(method='linear', limit=20)
+# TODO: Take this out, just putting in random ints to fill SQL database when wind station is down
+df_merged['speed'] = np.random.randint(1, 6, df_features.shape[0]).astype('float')
+df_merged['gust'] = np.random.randint(1, 6, df_features.shape[0]).astype('float')
+df_merged['lull'] = np.random.randint(1, 6, df_features.shape[0]).astype('float')
+df_merged['direction'] = np.random.randint(1, 6, df_features.shape[0]).astype('float')
+df_merged['temperature'] = np.random.randint(1, 6, df_features.shape[0]).astype('float')
+# df_merged['speed'] = df_merged['speed'].interpolate(method='linear', limit=20)
+# df_merged['gust'] = df_merged['gust'].interpolate(method='linear', limit=20)
+# df_merged['lull'] = df_merged['lull'].interpolate(method='linear', limit=20)
+# df_merged['direction'] = df_merged['direction'].interpolate(method='linear', limit=20)
+# df_merged['temperature'] = df_merged['temperature'].interpolate(method='linear', limit=20)
 df_merged = df_merged.dropna(subset=['speed', 'vancouverDegC'])
 
 # Whistler is only missing data at night, so interpolation should be OK
@@ -143,19 +118,6 @@ df_merged['ballenasKPa'] = df_merged['ballenasKPa'].interpolate(method='linear')
 df_merged['ballenasDegC'] = df_merged['ballenasDegC'].interpolate(method='linear')  # A few still missing
 df_merged['pamDegC'] = df_merged['pamDegC'].interpolate(method='linear')  # A few still missing
 
-# df_merged['comoxDegC'] = df_merged['comoxDegC'].interpolate(method='linear')
-# df_merged['comoxHum'] = df_merged['comoxHum'].interpolate(method='linear')
-# df_merged['comoxKPa'] = df_merged['comoxKPa'].interpolate(method='linear')
-# df_merged['pembertonDegC'] = df_merged['pembertonDegC'].interpolate(method='linear', order=5)
-# df_merged['pembertonHum'] = df_merged['pembertonHum'].interpolate(method='linear', order=5)
-# df_merged['pembertonKPa'] = df_merged['pembertonKPa'].interpolate(method='linear', order=5)
-# df_merged['victoriaDegC'] = df_merged['victoriaDegC'].interpolate(method='linear', order=5)
-# df_merged['victoriaHum'] = df_merged['victoriaHum'].interpolate(method='linear', order=5)
-# df_merged['victoriaKPa'] = df_merged['victoriaKPa'].interpolate(method='linear', order=5)
-# df_merged['lillooetDegC'] = df_merged['lillooetDegC'].interpolate(method='linear', order=5)
-# df_merged['lillooetHum'] = df_merged['lillooetHum'].interpolate(method='linear', order=5)
-# df_merged['lillooetKPa'] = df_merged['lillooetKPa'].interpolate(method='linear', order=5)
-
 # Fill the sky condition columns with the previous known entry
 # Assumption is that the gaps are small enough
 df_merged['vancouverSky'] = df_merged['vancouverSky'].ffill()
@@ -176,7 +138,8 @@ df_merged['lull_relative'] = df_merged['lull_relative'].clip(lower=0, upper=1, a
 # df_merged['day_fraction'] = (df_merged.index - df_merged.index.normalize()).total_seconds() / 86400  # Add as a categorical feature
 df_merged['sin_hour'] = np.sin(2 * np.pi * df_merged.index.hour / 24)
 df_merged['month'] = df_merged.index.month
-df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416, unit='D')).dt.days / 365
+df_merged['day'] = df_merged.index.day
+df_merged['year_fraction'] = (pd.to_timedelta(df_merged['month'] * 30.416 + df_merged['day'], unit='D')).dt.days / 365
 df_merged['gustLull_index'] = (df_merged['gust_relative'] - 1) + (1 - df_merged['lull_relative'])
 # df_merged['datetime'] = pd.to_datetime(df_merged['datetime'])  # Ensure it's in DateTime format
 df_merged['date'] = df_merged.index.date
@@ -197,6 +160,6 @@ df_merged = df_merged.reset_index(names=['time'])
 df_merged = df_merged[sorted(df_merged.columns)]
 
 # Save to csv file
-df_merged.to_csv('mergedOnSpeed_hourly.csv')
+df_merged.to_csv('mergedOnSpeed_forSQL.csv')
 
 
