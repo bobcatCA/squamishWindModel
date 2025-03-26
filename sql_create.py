@@ -7,7 +7,7 @@ cursor = conn.cursor()
 # Create table if it doesn't exist
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS weather (
-    datetime TEXT PRIMARY KEY,
+    datetime INTEGER PRIMARY KEY,
     ballenasDegC REAL,
     ballenasKPa REAL,
     comoxDegC REAL,

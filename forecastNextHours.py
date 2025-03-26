@@ -31,7 +31,6 @@ data = get_conditions_table_hourly(encoder_length=max_encoder_length, prediction
 data[training_features_reals_unknown] = data[training_features_reals_unknown].ffill()
 # data[training_labels] = data[training_labels].fillna(data[training_labels].mean())  # Replace NaNs with mean (or 0)
 data[training_labels] = data[training_labels].fillna(0)
-data.dropna(axis=0, inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # Now move on to feeding it into the Inference pass

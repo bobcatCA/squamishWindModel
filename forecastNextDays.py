@@ -31,7 +31,6 @@ data = get_conditions_table_daily()
 # data.loc[data.index[-5:], training_labels] = np.nan
 data[training_features_reals_unknown] = data[training_features_reals_unknown].ffill()
 data[training_labels] = data[training_labels].fillna(0)
-data.dropna(axis=0, inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # Now move on to feeding it into the Inference pass
