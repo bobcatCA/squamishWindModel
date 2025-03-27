@@ -29,7 +29,7 @@ data = get_conditions_table_hourly(encoder_length=max_encoder_length, prediction
 # data.loc[data.index[-8:], training_features_reals_unknown] = np.nan
 # data.loc[data.index[-8:], training_labels] = np.nan
 data[training_features_reals_unknown] = data[training_features_reals_unknown].ffill()
-# data[training_labels] = data[training_labels].fillna(data[training_labels].mean())  # Replace NaNs with mean (or 0)
+data[training_features_categorical] = data[training_features_categorical].bfill(limit=1)  # Only fill 1hr past/future gap
 data[training_labels] = data[training_labels].fillna(0)
 data.reset_index(drop=True, inplace=True)
 
@@ -113,7 +113,8 @@ for count, training_label in enumerate(training_labels):
 pass
 
 # Calculate the Quality Ratings based on the predictions
-df_forecast['sailingWindow'] = df_forecast['speed'] > 15
+minimum_speed = 13
+df_forecast['sailingWindow'] = df_forecast['speed'] > minimum_speed
 df_forecast['gustLullRating'] = (df_forecast['gust_Q7'] - df_forecast['gust_Q1'] +
                                  df_forecast['lull_Q7'] - df_forecast['lull_Q1'])
 df_forecast['gustLullRating'] = 5 - 4 * ((df_forecast['gustLullRating'] - 22) / 14)
@@ -121,6 +122,15 @@ df_forecast['gustLullRating'] = np.clip(round(df_forecast['gustLullRating']), 1,
 df_forecast['directionRating'] = df_forecast['direction_Q7'] - df_forecast['direction_Q1']
 df_forecast['directionRating'] = 5 - 4 * ((df_forecast['directionRating'] - 40) / 50)
 df_forecast['directionRating'] = np.clip(round(df_forecast['directionRating']), 1, 5)
-
 df_forecast = df_forecast.groupby('datetime').mean()  # TFT outputs multiple predictions per stamp, take mean() for now.
+df_forecast.loc[df_forecast['sailingWindow'] == False, 'gustLullRating'] = 0
+df_forecast.loc[df_forecast['sailingWindow'] == False, 'directionRating'] = 0
+
+# Compile subset and send
+df_transmit = df_forecast[['speed', 'gustLullRating', 'directionRating']].iloc[-8:].reset_index(drop=False)
+
+# Save as HTML table TODO: Update for API call
+html_table_hourly = df_transmit.to_html()
+with open('df_forecast_hourly.html', 'w') as f:
+    f.write(html_table_hourly)
 print('done')

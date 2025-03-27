@@ -73,7 +73,7 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     """
     today_14 = pd.to_datetime(pd.Timestamp.now().date()) + pd.to_timedelta(14, 'hours')
     start_time = today_14 - timedelta(days=encoder_length)
-    end_time = today_14 + timedelta(days=prediction_length)
+    end_time = today_14 + timedelta(days=prediction_length - 1)
     time_values = pd.date_range(start=start_time, end=end_time, freq='d')
 
     # Get corresponding recent data from SQL server
@@ -141,7 +141,7 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     # Make a new DF for the desired dates
     now_time = pd.Timestamp.now().ceil('h')
     start_time = now_time - timedelta(hours=encoder_length)
-    end_time = now_time + timedelta(hours=prediction_length)  # TODO: does this have to match the max_encoder_length exactly?
+    end_time = now_time + timedelta(hours=prediction_length - 1)  # TODO: does this have to match the max_encoder_length exactly?
     time_values = pd.date_range(start=start_time, end=end_time, freq='h')
     df = pd.DataFrame(columns=['datetime'])
 

@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import sqlite3
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, Baseline, QuantileLoss, NaNLabelEncoder
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 from updateWeatherData import get_conditions_table_daily
@@ -94,5 +93,14 @@ for count, training_label in enumerate(training_labels):
     df_target = df_target.groupby('datetime')[f'{training_label}'].mean()
     df_forecast = df_forecast.merge(df_target, on='datetime', how='right')
 pass
+
+# Narrow it down to the forecast days
+df_transmit = df_forecast.iloc[-5:].reset_index(drop=True)
+df_transmit['datetime'] = df_transmit['datetime'].dt.date
+
+# Save as HTML table TODO: Update for API call
+html_table_daily = df_transmit.to_html()
+with open('df_forecast_daily.html', 'w') as f:
+    f.write(html_table_daily)
 
 print('done')
