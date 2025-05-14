@@ -2,13 +2,26 @@ import json
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
+import tempfile
 import time
 
 def get_sws_df(dates):
     # Set up the WebDriver (e.g., for Chrome)
     # Make sure to provide the path to your Chrome WebDriver if necessary
-    driver = webdriver.Chrome()
+    # Create a temporary directory for the user data dir
+    temp_user_data_dir = tempfile.mkdtemp()
+
+    chrome_options = Options()
+    chrome_options.add_argument(f'--user-data-dir={temp_user_data_dir}')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--headless')  # Optional: if running without GUI
+
+    driver = webdriver.Chrome(options=chrome_options)
+    # driver = webdriver.Chrome()
     # df = pd.DataFrame(columns=['datetime', 'speed', 'direction','gust', 'lull', 'temperature'])
     first_date = True
     df = None

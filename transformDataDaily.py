@@ -18,7 +18,7 @@ def add_scores_to_df(df):
     df['lull_relative'] = df['lull'] / df['speed']  # Same thing with lull
     df['gustLull_index'] = (df['gust_relative'] - 1) + (1 - df['lull_relative'])
     df_directionscore = df[df['speed'] > 15].groupby('date')['direction'].std().reset_index(name='dir_stdev')
-    df_directionscore['dir_score'] = df_directionscore['dir_stdev'].apply(compute_5score, min_cutoff=0.8, max_cutoff=18)
+    df_directionscore['direction_variability'] = df_directionscore['dir_stdev'].apply(compute_5score, min_cutoff=0.8, max_cutoff=18)
     df_varscore = df[df['speed'] > 15].groupby('date')['gustLull_index'].mean().apply(compute_5score,
                                                                                           min_cutoff=0.15,
                                                                                           max_cutoff=0.75).reset_index(name='speed_variability')
@@ -30,7 +30,7 @@ def add_scores_to_df(df):
     df_ratings = df_ratings.merge(df_varscore, on='date', how='left')
     df_ratings['date'] = pd.to_datetime(df_ratings['date']) + pd.to_timedelta(14, 'hours')
     df_ratings.rename(columns={'date': 'datetime'}, inplace=True)
-    df_ratings.fillna({'dir_score': 0, 'speed_variability': 0}, inplace=True)
+    df_ratings.fillna({'direction_variability': 0, 'speed_variability': 0}, inplace=True)
     return df_ratings
 
 if __name__=='__main__':

@@ -7,12 +7,14 @@ from envCanadaStationPull import pull_past_hrs_weather
 from swsDataPull import get_sws_df
 from transformDataDaily import add_scores_to_df
 
+sql_database_path = '/home/bobcat/PycharmProjects/squamishWindModel/weather_data_hourly.db'
+
 def update_sql_db_hourly(df):
     """
     :param df: Pandas DataFrame, containing time-series weather station data
     :return: None
     """
-    conn = sqlite3.connect('weather_data_hourly.db')
+    conn = sqlite3.connect(sql_database_path)
 
     # Get existing table column names, keep only those matching, and commit.
     sql_columns = pd.read_sql("PRAGMA table_info(weather)", conn)['name'].tolist()
@@ -38,7 +40,7 @@ def update_sql_db_hourly(df):
     """.format(", ".join(df.columns), ", ".join(["?"] * len(df.columns)))
 
     # Connect to database and insert data
-    with sqlite3.connect('weather_data_hourly.db') as conn:
+    with sqlite3.connect(sql_database_path) as conn:
         cursor = conn.cursor()
 
         # Get initial row count before insertion
@@ -77,16 +79,10 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     time_values = pd.date_range(start=start_time, end=end_time, freq='d')
 
     # Get corresponding recent data from SQL server
-    conn = sqlite3.connect('weather_data_hourly.db')
+    conn = sqlite3.connect(sql_database_path)
     df_encoder = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(start_time.timestamp(), ))
     df_encoder['datetime'] = df_encoder['datetime'].astype('datetime64[s]')
     conn.close()
-
-    # TODO: Delete, once SWS is up and running
-    df_encoder['direction'] = np.random.randint(50, 361, df_encoder.shape[0])
-    df_encoder['lull'] = np.random.randint(1, 25, df_encoder.shape[0])
-    df_encoder['gust'] = np.random.randint(1, 25, df_encoder.shape[0])
-    df_encoder['speed'] = np.random.randint(1, 25, df_encoder.shape[0])
 
     # Merge SQL data with desired date range
     df = pd.DataFrame()
@@ -132,9 +128,9 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     # Pull the past and forecast data. Update the SQL database with recent data
     df_weather_recent = pull_past_hrs_weather()
     past24_dates = list(df_weather_recent['datetime'].dt.date.unique().astype(str))
-    # df_sws = get_sws_df(past24_dates)  # TODO: uncomment v
-    df_sws = get_sws_df(['2024-09-02', '2024-09-03'])  # TODO: Erase this once SWS weather station is up and running
-    df_sws['datetime'] + pd.to_timedelta(198, 'days')  # TODO: Ditto
+    df_sws = get_sws_df(past24_dates)  # TODO: uncomment v
+    # df_sws = get_sws_df(['2024-09-02', '2024-09-03'])  # TODO: Erase this once SWS weather station is up and running
+    # df_sws['datetime'] + pd.to_timedelta(198, 'days')  # TODO: Ditto
     df_recent = pd.merge_asof(df_weather_recent, df_sws, on='datetime', direction='nearest')
     update_sql_db_hourly(df_recent)
 
@@ -146,7 +142,7 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     df = pd.DataFrame(columns=['datetime'])
 
     # Get the recent data from SQL DB, per the encoder_length (df_recent may be smaller than encoder_length)
-    conn = sqlite3.connect('weather_data_hourly.db')
+    conn = sqlite3.connect(sql_database_path)
     df_encoder = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(start_time.timestamp(), ))
     df_encoder['datetime'] = df_encoder['datetime'].astype('datetime64[s]')
 
@@ -191,6 +187,6 @@ if __name__=='__main__':
     # df['datetime'] = pd.to_datetime(df['datetime'])
     # update_sql_db_hourly(df)
 
-    cnxn = sqlite3.connect('weather_data_hourly.db')
+    cnxn = sqlite3.connect(sql_database_path)
     df_test = pd.read_sql('SELECT * FROM weather', cnxn)
     pass
