@@ -1,7 +1,10 @@
 import numpy as np
 import os
 import pandas as pd
+import psutil
 import random
+import threading
+import time
 import torch
 from pathlib import Path
 from dotenv import load_dotenv
@@ -23,6 +26,28 @@ REAL_KNOWN_FEATURES = ['year_fraction', 'comoxDegC', 'lillooetDegC',
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 TARGET_VARIABLES = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
 # TARGET_VARIABLES = ['speed']  # Multiple targets - have to make a model for each
+
+
+def monitor_resources(interval=1, log_file='daily_forecast_resource_log.txt'):
+    """
+    :param interval: (Integer), log per n seconds
+    :param log_file: (Str), what to name the log file
+    :return: None
+    """
+    pid = os.getpid()
+    process = psutil.Process(pid)
+
+    with open(log_file, 'w') as f:
+        f.write('timestamp,cpu_percent,memory_mb\n')
+        while True:
+            try:
+                cpu = process.cpu_percent(interval=interval)  # % of single core
+                mem = process.memory_info().rss / 1024**2  # in MB
+                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+                f.write(f'{timestamp},{cpu:.2f},{mem:.2f}\n')
+                f.flush()
+            except psutil.NoSuchProcess:
+                break
 
 
 def prepare_data():
@@ -150,4 +175,11 @@ def main():
     #     f.write(html_table_daily)
 
 if __name__ == '__main__':
+    # Start monitoring in a background thread
+    # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
+    # monitor_thread.start()
+
     main()
+
+    # Sleep 1ms to let the logger finish the last write
+    # time.sleep(0.5)
