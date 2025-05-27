@@ -173,12 +173,13 @@ def main():
 
     df_transmit = compute_quality_metrics(df_transmit)
     df_transmit = df_transmit[['speed', 'speed_variability', 'direction_variability']].iloc[-8:].reset_index(drop=False)
-    df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
 
-    # # Save as HTML table TODO: Update for API call
+    # Save to file (csv, json...)
+    # df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
     # html_table_hourly = df_transmit.to_html()
     # with open('df_forecast_hourly.html', 'w') as f:
     #     f.write(html_table_hourly)
+    df_transmit.to_json(WORKING_DIRECTORY / f'hourly_speed_predictions.json', orient='records', lines=True)
 
 
 if __name__ == '__main__':

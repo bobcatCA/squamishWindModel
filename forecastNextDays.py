@@ -141,6 +141,8 @@ def save_forecast(df_forecast, output_path):
     df_transmit = df_forecast.iloc[-5:].reset_index(drop=True)
     df_transmit['datetime'] = df_transmit['datetime'].dt.date
     df_transmit.to_csv(output_path, index=False)
+    return df_transmit
+
 
 
 def main():
@@ -167,10 +169,11 @@ def main():
             df_predict = df_predict.merge(df_target, on='datetime', how='outer')
 
     # Save to CSV and finish script
-    save_forecast(df_predict, output_csv)
+    df_save = save_forecast(df_predict, output_csv)
+    df_save.to_json(WORKING_DIRECTORY / f'daily_speed_predictions.json', orient='records', lines=True)
 
-    # # Save as HTML table TODO: Update for API call
-    # html_table_daily = df_transmit.to_html()
+    # # Save as HTML table
+    # html_table_daily = df_predict.to_html()
     # with open('df_forecast_daily.html', 'w') as f:
     #     f.write(html_table_daily)
 

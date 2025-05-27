@@ -59,7 +59,8 @@ def pull_forecast_daily(time_range):
             months = dates.str.extract(r'([A-Za-z]+)$')  # Extract month
             df_station = pd.DataFrame()
             df_station['datetime'] = days + ' ' + months + ' ' + str(current_year)
-            df_station['datetime'] = pd.to_datetime(df_station['datetime']) + pd.to_timedelta(14, 'hours')
+            df_station['datetime'] = (pd.to_datetime(df_station['datetime'], format='mixed')
+                                      + pd.to_timedelta(14, 'hours'))
             df_station[f'{key}DegC'] = high_temps
             df_station[f'{key}Sky'] = weather_conditions
             df = df.merge(df_station, on='datetime', how='inner')

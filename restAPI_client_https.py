@@ -61,16 +61,24 @@ def upload_csv(filepath, session, url):
 
     # Read .csv file into dataframe, create csv buffer
     df = pd.read_csv(filepath)
-    csv_buffer = StringIO()
-    df.to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)
+    # csv_buffer = StringIO()
+    # df.to_csv(csv_buffer, index=False)
+    # csv_buffer.seek(0)
+    #
+    # files = {'file': ('data.csv', csv_buffer.getvalue())}
+    # headers = {'X-Filename': filepath.name}
 
-    files = {'file': ('data.csv', csv_buffer.getvalue())}
-    headers = {'X-Filename': filepath.name}
+    # Convert csv to Json string
+    json_string = df.to_json(orient='records')
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Filename': filepath.name
+    }
 
     # Send csv with headers to the destination
     try:
-        response = session.post(url, files=files, headers=headers, verify=False)
+        # response = session.post(url, files=files, headers=headers, verify=False)
+        response = session.post(url, data=json_string, headers=headers, verify=False)
         if response.ok:
             logging.info(f"Sent {filepath.name} - Status: {response.status_code} - Response: {response.text}")
         else:
