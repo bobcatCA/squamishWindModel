@@ -1,5 +1,6 @@
 import json
 import pandas as pd
+import platform
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -13,16 +14,25 @@ def get_sws_df(dates):
     # Make sure to provide the path to your Chrome WebDriver if necessary
     # Create a temporary directory for the user data dir
     temp_user_data_dir = tempfile.mkdtemp()
-
-    chrome_options = Options()
-    chrome_options.add_argument(f'--user-data-dir={temp_user_data_dir}')
+    chrome_options = Options() 
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--headless')  # Optional: if running without GUI
 
-    driver = webdriver.Chrome(options=chrome_options)
-    # driver = webdriver.Chrome()
-    # df = pd.DataFrame(columns=['datetime', 'speed', 'direction','gust', 'lull', 'temperature'])
+    if 'aarch64' in platform.machine():
+        chrome_options.binary_location = '/usr/bin/chromium-browser'
+        service = Service(executable_path='/usr/bin/chromedriver')
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    elif 'x86_64' in platform.machine():
+        chrome_options.add_argument(f'--user-data-dir={temp_user_data_dir}')
+        driver = webdriver.Chrome()
+
+    else:
+        driver = None
+        pass
+
+    # Initialize empty start points and loop throuhgh dates, adding data for each
     first_date = True
     df = None
     for date in dates:

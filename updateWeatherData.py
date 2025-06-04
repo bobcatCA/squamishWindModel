@@ -1,13 +1,20 @@
 import numpy as np
+import os
 import pandas as pd
 import sqlite3
 from datetime import timedelta
+from dotenv import load_dotenv
 from envCanadaForecastPull import pull_forecast_hourly, pull_forecast_daily
 from envCanadaStationPull import pull_past_hrs_weather
+from pathlib import Path
 from swsDataPull import get_sws_df
 from transformDataDaily import add_scores_to_df
 
-sql_database_path = '/home/bobcat/PycharmProjects/squamishWindModel/weather_data_hourly.db'
+
+# Load environment variables
+load_dotenv()
+sql_database_path = Path(os.getenv('DATABASE_DIRECTORY'))
+
 
 def update_sql_db_hourly(df):
     """

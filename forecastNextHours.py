@@ -175,7 +175,7 @@ def main():
     df_transmit = df_transmit[['speed', 'speed_variability', 'direction_variability']].iloc[-8:].reset_index(drop=False)
 
     # Save to file (csv, json...)
-    # df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
+    df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
     # html_table_hourly = df_transmit.to_html()
     # with open('df_forecast_hourly.html', 'w') as f:
     #     f.write(html_table_hourly)
