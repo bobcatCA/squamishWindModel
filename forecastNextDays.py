@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import os
 import pandas as pd
@@ -11,6 +12,13 @@ from dotenv import load_dotenv
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 from pytorch_forecasting.data import GroupNormalizer
 from updateWeatherData import get_conditions_table_daily
+
+
+# This class was necessary to ignore the loss loading from the Checkpoint (apparently can cause problems)
+class tft_with_ignore(TemporalFusionTransformer):
+    def __init__(self, *args, **kwargs):
+        self.save_hyperparameters(ignore=['loss'])  # Now this works as expected
+        super().__init__(*args, **kwargs)
 
 
 # Load environment and global variables
@@ -108,11 +116,13 @@ def predict_and_store(input_dataset, pytorch_dataset, target, forecast_n=3, fore
 
     # Load pre-trained checkpoint
     checkpoint = WORKING_DIRECTORY / f'tft{target}DailyCheckpoint.ckpt'
-    tft_model = TemporalFusionTransformer.load_from_checkpoint(checkpoint)
+    # tft_model = TemporalFusionTransformer.load_from_checkpoint(checkpoint)
+    tft_model = tft_with_ignore.load_from_checkpoint(checkpoint)
     tft_model.eval()
 
     # Create a dataloader batch and generate raw_predictions
-    pytorch_dataloader = pytorch_dataset.to_dataloader(train=False, batch_size=len(pytorch_dataset), shuffle=False)
+    pytorch_dataloader = pytorch_dataset.to_dataloader(train=False, batch_size=len(pytorch_dataset),
+                                                       shuffle=False, num_workers=7)
     raw_predictions = tft_model.predict(pytorch_dataloader, mode='raw', return_index=True, return_x=True)
 
     # Extract the predictions into usable format
@@ -147,6 +157,7 @@ def save_forecast(df_forecast, output_path):
 
 def main():
     # Attempt to get repeatability/deterministic behaviour during inferece
+    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     SEED = 42
     random.seed(SEED)
     np.random.seed(SEED)
@@ -162,7 +173,7 @@ def main():
     # Loop through targets and predict for each
     for target in TARGET_VARIABLES:
         prediction_dataset = build_prediction_dataset(preprocessed_dataset, target)
-        df_target = predict_and_store(preprocessed_dataset, prediction_dataset, target)
+        df_target = predict_and_store(preprocessed_dataset, prediction_dataset, target, forecast_n=0, forecast_q=6)  # TODO: Numbers are coming out weird... seems too low speed
         if df_predict.empty:
             df_predict = df_target
         else:

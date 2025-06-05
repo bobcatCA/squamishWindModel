@@ -30,16 +30,16 @@ def add_scores_to_df(df):
     df_ratings = df_ratings.merge(df_varscore, on='date', how='left')
     df_ratings['date'] = pd.to_datetime(df_ratings['date']) + pd.to_timedelta(14, 'hours')
     df_ratings.rename(columns={'date': 'datetime'}, inplace=True)
+    # df_ratings = df_ratings.merge(df, left_on='datetime', right_on='datetime', how='left')
+    # df_ratings = df_ratings.merge(df[['datetime', 'speed']], on='datetime', how='left')
+    # df_ratings.drop(columns=['time'], inplace=True)
     df_ratings.fillna({'direction_variability': 0, 'speed_variability': 0}, inplace=True)
     return df_ratings
 
 if __name__=='__main__':
-    data = pd.read_csv('mergedOnSpeed_hourly.csv')  # Assuming you have your data in a CSV
-    data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
-    data = data.sort_values('time')  # Sort chronologically (if not already)
-
-
-    data = data[data['hour'] == 14].reset_index(drop=True)
-
-    data.to_csv('mergedOnSpeed_daily.csv')
+    # data = pd.read_csv('mergedOnSpeed_hourly.csv')  # Assuming you have your data in a CSV
+    # data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
+    # data = data.sort_values('time')  # Sort chronologically (if not already)
+    # data = add_scores_to_df(data)
+    # data.to_csv('mergedOnSpeed_daily.csv')
     pass

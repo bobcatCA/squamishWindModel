@@ -1,8 +1,8 @@
-import pandas as pd
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, RMSE, QuantileLoss
 from pytorch_forecasting.data import GroupNormalizer
 from lightning.pytorch import Trainer
 import numpy as np
+import pandas as pd
 
 class tft_with_ignore(TemporalFusionTransformer):
     def __init__(self, *args, loss=None, **kwargs):
@@ -64,7 +64,8 @@ for training_label in training_labels:
     )
 
     # Create a validation dataset
-    validation = TimeSeriesDataSet.from_dataset(training, data, predict=True, stop_randomization=True)
+    validation = TimeSeriesDataSet.from_dataset(
+        training, data, predict=True, stop_randomization=True)
 
     # Create PyTorch DataLoader for training and validation
     batch_size = 128
@@ -79,17 +80,19 @@ for training_label in training_labels:
     tft = tft_with_ignore.from_dataset(
         training,
         learning_rate=1e-3,
-        hidden_size=32,  # Size of the hidden layer
+        hidden_size=64,  # Size of the hidden layer
         attention_head_size=4,
         dropout=0.2,
         hidden_continuous_size=4,
         # output_size=1,  # Will be 1 (not using quintiles)
         output_size=7,
-        loss=loss_func,
+        # loss=loss_func,
+        logging_metrics=[],
         log_interval=10,
         reduce_on_plateau_patience=4,
         # optimizer='adam'
     )
+    tft.loss = loss_func
 
     # Wrap the model in a PyTorch Lightning Trainer
     trainer = Trainer(

@@ -4,9 +4,19 @@ from pytorch_forecasting.data import GroupNormalizer
 from lightning.pytorch import Trainer
 import numpy as np
 
-if __name__=='__main__':
 
+class tft_with_ignore(TemporalFusionTransformer):
+    def __init__(self, *args, loss=None, logging_metrics=None, **kwargs):
+        # Save hyperparameters, except loss and
+        self.save_hyperparameters(ignore=['loss', 'logging_metrics'])
+
+        # Call parent class
+        super().__init__(*args, loss=loss, logging_metrics=logging_metrics, **kwargs)
+
+
+if __name__=='__main__':
     data = pd.read_csv('mergedOnSpeed_daily.csv')  # Assuming you have your data in a CSV
+    data.dropna(thresh=14, inplace=True)
     # data = data[20000:26599]  # Subset to reduce compute time
     data['static'] = 'S'  # Put a static data column into the df (required for training)
     data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
@@ -24,7 +34,7 @@ if __name__=='__main__':
     # training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
     #                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
     training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
-    training_labels = ['speed', 'speed_variability', 'dir_score']  # Multiple targets - have to make a model for each
+    training_labels = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
 
     # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
     # model, it seems like all the target parameters are just averaging together.
@@ -63,7 +73,7 @@ if __name__=='__main__':
         # loss_func = WeightedMSELoss(weights_func=custom_weights)
 
         # Define the Temporal Fusion Transformer model
-        tft = TemporalFusionTransformer.from_dataset(
+        tft = tft_with_ignore.from_dataset(
             training,
             learning_rate=1e-3,
             hidden_size=32,  # Size of the hidden layer
@@ -72,11 +82,12 @@ if __name__=='__main__':
             hidden_continuous_size=4,
             # output_size=1,  # Will be 1 (not using quintiles)
             output_size=7,
-            loss=loss_func,
+            # loss=loss_func,
             log_interval=10,
             reduce_on_plateau_patience=4,
             # optimizer='adam'
         )
+        tft.loss = loss_func
 
         # Wrap the model in a PyTorch Lightning Trainer
         if training_label == 'dir_score':

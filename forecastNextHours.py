@@ -1,17 +1,14 @@
+import logging
 import numpy as np
 import os
 import pandas as pd
 import psutil
-import threading
+# import threading
 import time
-import litmodels
 from pathlib import Path
 from dotenv import load_dotenv
 from updateWeatherData import get_conditions_table_hourly
-from pytorch_forecasting import (
-    TimeSeriesDataSet, TemporalFusionTransformer,
-    GroupNormalizer
-)
+from pytorch_forecasting import (TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer)
 
 
 # This class was necessary to ignore the loss loading from the Checkpoint (apparently can cause problems)
@@ -78,7 +75,7 @@ def prepare_data():
     return data
 
 
-def load_model_and_predict(data, target):
+def load_model_and_predict(data, target, forecast_n=7, forecast_q=3):
     """
     :param data: Pandas dataframe, pre-processed
     :param target: Str, name of target (label) variable
@@ -112,24 +109,22 @@ def load_model_and_predict(data, target):
 
     # Generate raw predictions, and extract from output
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)
-
-    forecast_step = 7  # n hours ahead prediction
     datetime_idx = data['datetime']
     pred_datetime = datetime_idx[raw_predictions.index['time_idx']].reset_index(drop=True)
 
     # Predicted mean (3rd quantile out of 0-7)
     y_pred_mean = pd.Series(
-        raw_predictions.output.prediction[:, forecast_step, 3]
-    ).shift(periods=forecast_step)
+        raw_predictions.output.prediction[:, forecast_n, forecast_q]
+    ).shift(periods=forecast_n)
 
     # Pull out Q1 and Q7 for direction, lull, and gust (used later in ratings)
     if any(name in target for name in ['direction', 'lull', 'gust']):
         y_pred_Q1 = pd.Series(
-            raw_predictions.output.prediction[:, forecast_step, 0]
-        ).shift(periods=forecast_step)
+            raw_predictions.output.prediction[:, forecast_n, 0]
+        ).shift(periods=forecast_n)
         y_pred_Q7 = pd.Series(
-            raw_predictions.output.prediction[:, forecast_step, 6]
-        ).shift(periods=forecast_step)
+            raw_predictions.output.prediction[:, forecast_n, 6]
+        ).shift(periods=forecast_n)
         result_df = pd.DataFrame({
             'datetime': pred_datetime,
             target: y_pred_mean,
@@ -168,11 +163,12 @@ def compute_quality_metrics(df):
 
 
 def main():
+    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     data = prepare_data()
     df_transmit = pd.DataFrame()
 
     for target in TARGET_VARIABLES:
-        df_forecast = load_model_and_predict(data, target)
+        df_forecast = load_model_and_predict(data, target, forecast_n=MAX_PREDICTION_LENGTH - 1, forecast_q=3)
         if df_transmit.empty:
             df_transmit = df_forecast
         else:
@@ -183,10 +179,10 @@ def main():
 
     # Save to file (csv, json...)
     df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
+    df_transmit.to_json(WORKING_DIRECTORY / f'hourly_speed_predictions.json', orient='records', lines=True)
     # html_table_hourly = df_transmit.to_html()
     # with open('df_forecast_hourly.html', 'w') as f:
     #     f.write(html_table_hourly)
-    df_transmit.to_json(WORKING_DIRECTORY / f'hourly_speed_predictions.json', orient='records', lines=True)
 
 
 if __name__ == '__main__':
