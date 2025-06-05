@@ -26,7 +26,7 @@ def get_sws_df(dates):
 
     elif 'x86_64' in platform.machine():
         chrome_options.add_argument(f'--user-data-dir={temp_user_data_dir}')
-        driver = webdriver.Chrome()
+        driver = webdriver.Chrome(options=chrome_options)
 
     else:
         driver = None

@@ -61,7 +61,7 @@ def pull_past_hrs_weather():
     first_station = True
 
     for key, value in urls.items():
-        print(f'Fetching values for {key}')
+        # print(f'Fetching values for {key}')
         response = requests.get(value)
         if response.status_code == 200:
 

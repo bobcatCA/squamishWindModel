@@ -4,6 +4,14 @@ from pytorch_forecasting.data import GroupNormalizer
 from lightning.pytorch import Trainer
 import numpy as np
 
+class tft_with_ignore(TemporalFusionTransformer):
+    def __init__(self, *args, loss=None, **kwargs):
+        # Save hyperparameters, except loss and
+        self.save_hyperparameters(ignore=['loss'])
+
+        # Call parent class
+        super().__init__(*args, loss=loss, **kwargs)
+
 data = pd.read_csv('mergedOnSpeed_hourly.csv')  # Assuming you have your data in a CSV
 # data = data[20000:26599]  # Subset to reduce compute time
 
@@ -67,7 +75,8 @@ for training_label in training_labels:
     # loss_func = WeightedMSELoss(weights_func=custom_weights)
 
     # Define the Temporal Fusion Transformer model
-    tft = TemporalFusionTransformer.from_dataset(
+    # tft = TemporalFusionTransformer.from_dataset(
+    tft = tft_with_ignore.from_dataset(
         training,
         learning_rate=1e-3,
         hidden_size=32,  # Size of the hidden layer
@@ -93,7 +102,7 @@ for training_label in training_labels:
     trainer.fit(tft, train_dataloader, val_dataloader)
 
     # Save the model after training
-    checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint1.ckpt'
+    checkpoint_filename = 'tft' + training_label + 'HourlyCheckpoint.ckpt'
     # trainer.save_checkpoint(checkpoint_filename)
 
     pass

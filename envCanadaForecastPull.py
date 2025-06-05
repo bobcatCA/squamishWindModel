@@ -41,7 +41,7 @@ def pull_forecast_daily(time_range):
     current_year = datetime.date.today().year
 
     for key, value in urls.items():
-        print(f'fetching dailys for {key}')
+        # print(f'fetching dailys for {key}')
         response = requests.get(value)
         
         if response.status_code == 200:
@@ -87,7 +87,7 @@ def pull_forecast_hourly():
 
     # Loop through all the URLs and compile a dataframe of all the data. Merge it with df
     for key, value in urls.items():
-        print(f'Fetching values for {key}')
+        # print(f'Fetching values for {key}')
         response = requests.get(value)
         if response.status_code == 200:
 

@@ -4,6 +4,7 @@ import pandas as pd
 import psutil
 import threading
 import time
+import litmodels
 from pathlib import Path
 from dotenv import load_dotenv
 from updateWeatherData import get_conditions_table_hourly
@@ -12,6 +13,12 @@ from pytorch_forecasting import (
     GroupNormalizer
 )
 
+
+# This class was necessary to ignore the loss loading from the Checkpoint (apparently can cause problems)
+class tft_with_ignore(TemporalFusionTransformer):
+    def __init__(self, *args, **kwargs):
+        self.save_hyperparameters(ignore=['loss'])  # Now this works as expected
+        super().__init__(*args, **kwargs)
 
 # Load environment and global variables
 load_dotenv()
@@ -79,7 +86,7 @@ def load_model_and_predict(data, target):
     """
 
     # Load pre-trained checkpoint and generate PyTorch dataset object
-    checkpoint_path = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint1.ckpt'
+    checkpoint_path = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
     dataset = TimeSeriesDataSet(
         data,
         time_idx='time_idx',
@@ -100,8 +107,8 @@ def load_model_and_predict(data, target):
     )
 
     # Generate a dataloader batch (entire dataset for inference pass)
-    batch = dataset.to_dataloader(train=False, batch_size=len(dataset), shuffle=False)
-    model = TemporalFusionTransformer.load_from_checkpoint(checkpoint_path)
+    batch = dataset.to_dataloader(train=False, batch_size=len(dataset), shuffle=False, num_workers=7)
+    model = tft_with_ignore.load_from_checkpoint(checkpoint_path)
 
     # Generate raw predictions, and extract from output
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)
@@ -183,12 +190,12 @@ def main():
 
 
 if __name__ == '__main__':
-    # Start monitoring in a background thread
-    monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
-    monitor_thread.start()
+    # Start monitoring in a background thread, if desired to monitore resource load
+    # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
+    # monitor_thread.start()
 
     # Run the main function
     main()
 
-    # Sleep 1ms to let the logger finish the last write
-    time.sleep(0.5)
+    # Sleep 1ms to let the logger finish the last write (uncomment if using monitor_resources)
+    # time.sleep(0.5)

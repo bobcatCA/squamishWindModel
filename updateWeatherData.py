@@ -13,7 +13,7 @@ from transformDataDaily import add_scores_to_df
 
 # Load environment variables
 load_dotenv()
-sql_database_path = Path(os.getenv('DATABASE_DIRECTORY'))
+sql_database_path = Path(os.getenv('WORKING_DIRECTORY')) / 'weather_data_hourly.db'
 
 
 def update_sql_db_hourly(df):
