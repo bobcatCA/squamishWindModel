@@ -1,4 +1,5 @@
 import logging
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
@@ -66,6 +67,16 @@ def prepare_data():
     """
     # Compile HTML-scraped weather data and pre-process
     data = get_conditions_table_daily()
+
+    ##### For testing only ######
+    # data = pd.read_csv('mergedOnSpeed_daily.csv')
+    # # data.rename(columns={'time': 'datetime'}, inplace=True)
+    # data = data.loc[55:70].reset_index(drop=True)
+    # data.dropna(thresh=14, inplace=True)
+    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, REAL_UNKNOWN_FEATURES] = np.nan
+    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, TARGET_VARIABLES] = np.nan
+    # ##############################
+
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].fillna(0)
     data.reset_index(drop=True, inplace=True)
@@ -154,26 +165,42 @@ def save_forecast(df_forecast, output_path):
     return df_transmit
 
 
+def plot_measured_forecast(df_measured, df_forecast):
+    date_measured = df_measured['datetime']
+    speed_measured = df_measured['speed']
+
+    date_forecast = df_forecast['datetime']
+    speed_forecast = df_forecast['speed']
+
+    fig, ax = plt.subplots()
+    ax.plot(date_measured, speed_measured, label='measured')
+    ax.plot(date_forecast, speed_forecast, label='forecast')
+    ax.legend()
+    plt.legend()
+    plt.show()
+    pass
+
 
 def main():
-    # Attempt to get repeatability/deterministic behaviour during inferece
-    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
-    SEED = 42
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    torch.use_deterministic_algorithms(True)
+    # # Attempt to get repeatability/deterministic behaviour during inferece
+    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    # SEED = 42
+    # random.seed(SEED)
+    # np.random.seed(SEED)
+    # torch.manual_seed(SEED)
+    # torch.cuda.manual_seed_all(SEED)
+    # torch.use_deterministic_algorithms(True)
 
     # Load data from HTML scraper
     output_csv = WORKING_DIRECTORY / 'daily_speed_predictions.csv'
-    preprocessed_dataset = prepare_data()
+    df_encoder = prepare_data()
     df_predict = pd.DataFrame()
 
     # Loop through targets and predict for each
     for target in TARGET_VARIABLES:
-        prediction_dataset = build_prediction_dataset(preprocessed_dataset, target)
-        df_target = predict_and_store(preprocessed_dataset, prediction_dataset, target, forecast_n=0, forecast_q=6)  # TODO: Numbers are coming out weird... seems too low speed
+        prediction_dataset = build_prediction_dataset(df_encoder, target)
+        df_target = predict_and_store(df_encoder, prediction_dataset, target,
+                                      forecast_n=0, forecast_q=4)  # TODO: Numbers are coming out weird... seems too low speed
         if df_predict.empty:
             df_predict = df_target
         else:
@@ -182,6 +209,7 @@ def main():
     # Save to CSV and finish script
     df_save = save_forecast(df_predict, output_csv)
     df_save.to_json(WORKING_DIRECTORY / f'daily_speed_predictions.json', orient='records', lines=True)
+    # plot_measured_forecast(df_encoder, df_predict)
 
     # # Save as HTML table
     # html_table_daily = df_predict.to_html()

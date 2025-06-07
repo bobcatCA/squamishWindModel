@@ -1,4 +1,5 @@
 import logging
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
@@ -29,6 +30,7 @@ REAL_KNOWN_FEATURES = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
                        'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 TARGET_VARIABLES = ['speed', 'gust', 'lull', 'direction']  # Each will have a separate model
+# TARGET_VARIABLES = ['speed']  # Each will have a separate model
 
 
 def monitor_resources(interval=1, log_file='hourly_forecast_resource_log.txt'):
@@ -64,6 +66,14 @@ def prepare_data():
         encoder_length=MAX_ENCODER_LENGTH,
         prediction_length=MAX_PREDICTION_LENGTH
     )
+
+    ###### For testing only ######
+    # data = pd.read_csv('mergedOnSpeed_hourly.csv')
+    # data.rename(columns={'time': 'datetime'}, inplace=True)
+    # data = data.loc[23794:25791].reset_index(drop=True)
+    # data.loc[len(data) - 8:, REAL_UNKNOWN_FEATURES] = np.nan
+    # data.loc[len(data) - 8:, TARGET_VARIABLES] = np.nan
+    ##############################
 
     # Pre-process data (fill missing, re-index)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
@@ -161,14 +171,29 @@ def compute_quality_metrics(df):
     df.loc[df['sailingWindow'] == False, ['speed_variability', 'direction_variability']] = 0
     return df
 
+def plot_measured_forecast(df_measured, df_forecast):
+    date_measured = df_measured['datetime']
+    speed_measured = df_measured['speed']
+
+    date_forecast = df_forecast['datetime']
+    speed_forecast = df_forecast['speed']
+
+    fig, ax = plt.subplots()
+    ax.plot(date_measured, speed_measured, label='measured')
+    ax.plot(date_forecast, speed_forecast, label='forecast')
+    ax.legend()
+    plt.legend()
+    plt.show()
+    pass
+
 
 def main():
-    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     data = prepare_data()
     df_transmit = pd.DataFrame()
 
     for target in TARGET_VARIABLES:
-        df_forecast = load_model_and_predict(data, target, forecast_n=MAX_PREDICTION_LENGTH - 1, forecast_q=3)
+        df_forecast = load_model_and_predict(data, target, forecast_n=0, forecast_q=3)
         if df_transmit.empty:
             df_transmit = df_forecast
         else:
@@ -176,6 +201,7 @@ def main():
 
     df_transmit = compute_quality_metrics(df_transmit)
     df_transmit = df_transmit[['speed', 'speed_variability', 'direction_variability']].iloc[-8:].reset_index(drop=False)
+    # plot_measured_forecast(data, df_transmit.reset_index())
 
     # Save to file (csv, json...)
     df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
@@ -183,7 +209,6 @@ def main():
     # html_table_hourly = df_transmit.to_html()
     # with open('df_forecast_hourly.html', 'w') as f:
     #     f.write(html_table_hourly)
-
 
 if __name__ == '__main__':
     # Start monitoring in a background thread, if desired to monitore resource load
