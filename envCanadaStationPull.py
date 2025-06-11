@@ -104,6 +104,7 @@ def pull_past_hrs_weather():
             df_station = df_station.merge(df_date_idx, left_on=df_station.index, right_on='startIdx', how='left')
             df_station['day'] = df_station['day'].ffill()
             df_station['datetime'] = df_station['day'] + df_station['datetime']
+            df_station['datetime'] = df_station['datetime'].dt.tz_localize('America/Vancouver')
 
             # Narrow down to required columns, change values to numeric or standard strings
             df_station = df_station[new_names]

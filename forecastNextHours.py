@@ -160,7 +160,7 @@ def compute_quality_metrics(df):
     df['direction_variability'] = 5 - 4 * ((df['direction_variability'] - 40) / 50)
     df['direction_variability'] = np.clip(round(df['direction_variability']), 1, 5)
 
-    df = df.groupby('datetime').mean()
+    # df = df.groupby('datetime').mean()
     df.loc[df['sailingWindow'] == False, ['speed_variability', 'direction_variability']] = 0
     return df
 
@@ -193,7 +193,6 @@ def main():
             df_transmit = df_transmit.merge(df_forecast, on='datetime', how='outer')
 
     df_transmit = compute_quality_metrics(df_transmit)
-    df_transmit = df_transmit[['speed', 'speed_variability', 'direction_variability']].iloc[-8:].reset_index(drop=False)
     # plot_measured_forecast(data, df_transmit.reset_index())
 
     # Save to file (csv, json...)

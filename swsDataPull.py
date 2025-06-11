@@ -90,6 +90,7 @@ def get_sws_df(dates):
         df.rename(columns=dict_names, inplace=True)
         df = df.apply(pd.to_numeric, errors='coerce')
         df['datetime'] = pd.to_datetime(df['datetime'], unit='s')
+        df['datetime'] = df['datetime'].dt.tz_localize('America/Vancouver')
         df[['direction', 'gust', 'lull']] = df[['direction', 'gust', 'lull']].astype(float)
         df.sort_values('datetime', inplace=True)
 

@@ -29,11 +29,14 @@ def add_scores_to_df(df):
     df_ratings = df_ratings.merge(df_directionscore, on='date', how='left')
     df_ratings = df_ratings.merge(df_varscore, on='date', how='left')
     df_ratings['date'] = pd.to_datetime(df_ratings['date']) + pd.to_timedelta(14, 'hours')
+    df_ratings['date'] = df_ratings['date'].dt.tz_localize('America/Vancouver')
     df_ratings.rename(columns={'date': 'datetime'}, inplace=True)
     # df_ratings = df_ratings.merge(df, left_on='datetime', right_on='datetime', how='left')
     # df_ratings = df_ratings.merge(df[['datetime', 'speed']], on='datetime', how='left')
     # df_ratings.drop(columns=['time'], inplace=True)
     df_ratings.fillna({'direction_variability': 0, 'speed_variability': 0}, inplace=True)
+    # df_ratings = df_ratings.merge(df[['datetime', 'speed']], on='datetime', how='left')
+    df_ratings.drop(columns='dir_stdev', inplace=True)
     return df_ratings
 
 if __name__=='__main__':

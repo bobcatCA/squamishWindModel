@@ -28,6 +28,7 @@ def find_best_name_match(target, list_of_possible, prefer=None, threshold=80):
 def pull_forecast_daily(time_range):
     df = pd.DataFrame()
     df['datetime'] = time_range
+    df['datetime'] = df['datetime'].dt.tz_localize('America/Vancouver')
 
     urls = {
         'comox': 'https://weather.gc.ca/en/location/index.html?coords=49.674,-124.928',
@@ -61,6 +62,7 @@ def pull_forecast_daily(time_range):
             df_station['datetime'] = days + ' ' + months + ' ' + str(current_year)
             df_station['datetime'] = (pd.to_datetime(df_station['datetime'], format='mixed')
                                       + pd.to_timedelta(14, 'hours'))
+            df_station['datetime'] = df_station['datetime'].dt.tz_localize('America/Vancouver')
             df_station[f'{key}DegC'] = high_temps
             df_station[f'{key}Sky'] = weather_conditions
             df = df.merge(df_station, on='datetime', how='inner')
@@ -131,6 +133,7 @@ def pull_forecast_hourly():
             df_station = df_station.merge(df_date_idx, left_on=df_station.index, right_on='startIdx', how='left')
             df_station['day'] = df_station['day'].ffill()
             df_station['datetime'] = df_station['day'] + df_station['datetime']
+            df_station['datetime'] = df_station['datetime'].dt.tz_localize('America/Vancouver')
             df_station = df_station[new_names]
 
             # Convert to the proper type (numeric, string of standard categories)
