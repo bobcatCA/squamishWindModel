@@ -34,7 +34,6 @@ REAL_KNOWN_FEATURES = ['year_fraction', 'comoxDegC', 'lillooetDegC',
                                      'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 TARGET_VARIABLES = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
-# TARGET_VARIABLES = ['speed']  # Multiple targets - have to make a model for each
 
 
 def monitor_resources(interval=1, log_file='daily_forecast_resource_log.txt'):
@@ -78,7 +77,7 @@ def prepare_data():
     # ##############################
 
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
-    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].fillna(0)
+    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
     data.reset_index(drop=True, inplace=True)
     data['static'] = 'S'  # Required static group
     data['time_idx'] = np.arange(data.shape[0])
@@ -94,28 +93,21 @@ def build_prediction_dataset(input_dataframe, target_variable):
     :return: TimeSeriesDataSet: Dataset ready for prediction.
     """
 
-    dataset = TimeSeriesDataSet(
+    # Load training dataset for parameters to pass into inference batch
+    with torch.serialization.safe_globals([TimeSeriesDataSet]):
+        training_dataset = torch.load(f'{target_variable}_training_dataset_daily.pkl', weights_only=False)
+
+    # Create inference dataset
+    inference_dataset = TimeSeriesDataSet.from_dataset(
+        training_dataset,
         input_dataframe,
-        time_idx='time_idx',
-        target=target_variable,
-        group_ids=['static'],
-        static_categoricals=['static'],
-        time_varying_known_categoricals=CATEGORICAL_FEATURES,
-        time_varying_known_reals=REAL_KNOWN_FEATURES,
-        time_varying_unknown_reals=[target_variable] + REAL_UNKNOWN_FEATURES,
-        min_encoder_length=1,
-        max_encoder_length=MAX_ENCODER_LENGTH,
-        min_prediction_length=1,
-        max_prediction_length=MAX_PREDICTION_LENGTH,
-        target_normalizer=GroupNormalizer(groups=['static']),
-        add_relative_time_idx=True,
-        add_target_scales=True,
-        randomize_length=None
+        predict=True,
+        stop_randomization=True
     )
-    return dataset
+    return inference_dataset
 
 
-def predict_and_store(input_dataset, pytorch_dataset, target, forecast_n=3, forecast_q=4):
+def predict_and_store(input_dataset, pytorch_dataset, target, forecast_q=3):
     """
     :param input_dataset: (pd.DataFrame): Original data.
     :param pytorch_dataset:  (PyTorch TimeSeriesDataSet): Dataset for prediction.
@@ -127,31 +119,29 @@ def predict_and_store(input_dataset, pytorch_dataset, target, forecast_n=3, fore
 
     # Load pre-trained checkpoint
     checkpoint = WORKING_DIRECTORY / f'tft{target}DailyCheckpoint.ckpt'
-    # tft_model = TemporalFusionTransformer.load_from_checkpoint(checkpoint)
     tft_model = tft_with_ignore.load_from_checkpoint(checkpoint)
     tft_model.eval()
 
     # Create a dataloader batch and generate raw_predictions
     pytorch_dataloader = pytorch_dataset.to_dataloader(train=False, batch_size=len(pytorch_dataset),
-                                                       shuffle=False, num_workers=7)
+                                                       shuffle=False, num_workers=4)
     raw_predictions = tft_model.predict(pytorch_dataloader, mode='raw', return_index=True, return_x=True)
 
     # Extract the predictions into usable format
-    x_range_pred = input_dataset['datetime'][raw_predictions.index['time_idx']]
-    y_range_pred = (
-        pd.Series(raw_predictions.output.prediction[:, forecast_n, forecast_q])
-        .shift(periods=forecast_n)
-    )
+    datetime_measured = input_dataset['datetime']
+    pred_datetime_idx = raw_predictions.index['time_idx'].max()
+    y_range_pred = raw_predictions.output.prediction[:, :, forecast_q].numpy().reshape(-1)
+    datetime_pred = input_dataset['datetime'].iloc[pred_datetime_idx:len(input_dataset)]
 
     # Compile multiple output series into dataframe along with corresponding label and return
     df_target = pd.DataFrame()
-    df_target['datetime'] = x_range_pred
+    df_target['datetime'] = datetime_pred
     df_target[f'{target}'] = y_range_pred
-    df_target = df_target.groupby('datetime')[f'{target}'].mean().reset_index()
+    # df_target = df_target.groupby('datetime')[f'{target}'].mean().reset_index()
     return df_target
 
 
-def save_forecast(df_forecast, output_path):
+def save_forecast(df_transmit, output_path):
     """
     Takes the most recent 6 points of the forecast and save to csv.
 
@@ -159,7 +149,7 @@ def save_forecast(df_forecast, output_path):
     :param output_path: (Path): Path to save the CSV file.
     :return:
     """
-    df_transmit = df_forecast.iloc[-5:].reset_index(drop=True)
+    # df_transmit = df_forecast.iloc[-5:].reset_index(drop=True)
     df_transmit['datetime'] = df_transmit['datetime'].dt.date
     df_transmit.to_csv(output_path, index=False)
     return df_transmit
@@ -182,15 +172,6 @@ def plot_measured_forecast(df_measured, df_forecast):
 
 
 def main():
-    # # Attempt to get repeatability/deterministic behaviour during inferece
-    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
-    # SEED = 42
-    # random.seed(SEED)
-    # np.random.seed(SEED)
-    # torch.manual_seed(SEED)
-    # torch.cuda.manual_seed_all(SEED)
-    # torch.use_deterministic_algorithms(True)
-
     # Load data from HTML scraper
     output_csv = WORKING_DIRECTORY / 'daily_speed_predictions.csv'
     df_encoder = prepare_data()
@@ -199,8 +180,7 @@ def main():
     # Loop through targets and predict for each
     for target in TARGET_VARIABLES:
         prediction_dataset = build_prediction_dataset(df_encoder, target)
-        df_target = predict_and_store(df_encoder, prediction_dataset, target,
-                                      forecast_n=0, forecast_q=4)  # TODO: Numbers are coming out weird... seems too low speed
+        df_target = predict_and_store(df_encoder, prediction_dataset, target, forecast_q=3)
         if df_predict.empty:
             df_predict = df_target
         else:

@@ -17,7 +17,6 @@ class tft_with_ignore(TemporalFusionTransformer):
 if __name__=='__main__':
     data = pd.read_csv('mergedOnSpeed_daily.csv')  # Assuming you have your data in a CSV
     data.dropna(thresh=14, inplace=True)
-    # data = data[20000:26599]  # Subset to reduce compute time
     data['static'] = 'S'  # Put a static data column into the df (required for training)
     data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
@@ -28,11 +27,8 @@ if __name__=='__main__':
 
     # Build the variables that form the basis of the model architecture
     training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-    # training_features_reals_known = ['day_fraction', 'year_fraction']
     training_features_reals_known = ['year_fraction', 'comoxDegC', 'lillooetDegC',
                                      'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-    # training_features_reals_unknown = ['comoxDegC', 'comoxKPa', 'vancouverDegC', 'vancouverKPa', 'whistlerDegC', 'pembertonDegC',
-    #                            'lillooetDegC', 'lillooetKPa', 'pamDegC', 'pamKPa', 'ballenasDegC', 'ballenasKPa']
     training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
     training_labels = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
 
@@ -61,53 +57,56 @@ if __name__=='__main__':
             randomize_length=None
         )
 
-        # Create a validation dataset
-        validation = TimeSeriesDataSet.from_dataset(training, data, predict=True, stop_randomization=True)
+        # Save the training dataset (metadata of the training dataset is used for inference)
+        training.save(f'{training_label}_training_dataset_daily.pkl')
 
-        # Create PyTorch DataLoader for training and validation
-        batch_size = 1024
-        train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=2)
-        val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=2)
-        # loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
-        loss_func = QuantileLoss()
-        # loss_func = WeightedMSELoss(weights_func=custom_weights)
-
-        # Define the Temporal Fusion Transformer model
-        tft = tft_with_ignore.from_dataset(
-            training,
-            learning_rate=1e-3,
-            hidden_size=32,  # Size of the hidden layer
-            attention_head_size=4,
-            dropout=0.2,
-            hidden_continuous_size=4,
-            # output_size=1,  # Will be 1 (not using quintiles)
-            output_size=7,
-            # loss=loss_func,
-            log_interval=10,
-            reduce_on_plateau_patience=4,
-            # optimizer='adam'
-        )
-        tft.loss = loss_func
-
-        # Wrap the model in a PyTorch Lightning Trainer
-        if training_label == 'dir_score':
-            max_epochs = 20
-        else:
-            max_epochs = 15
-            pass
-
-        trainer = Trainer(
-            accelerator='cpu',
-            max_epochs=max_epochs,
-            gradient_clip_val=0.1
-        )
-
-        # Train the model
-        trainer.fit(tft, train_dataloader, val_dataloader)
-
-        # Save the model after training
-        checkpoint_filename = 'tft' + training_label + 'DailyCheckpoint.ckpt'
-        trainer.save_checkpoint(checkpoint_filename)
+        # # Create a validation dataset
+        # validation = TimeSeriesDataSet.from_dataset(training, data, predict=True, stop_randomization=True)
+        #
+        # # Create PyTorch DataLoader for training and validation
+        # batch_size = 1024
+        # train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=4)
+        # val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=4)
+        # # loss_func = RMSE()  # TODO: determine if this is the best loss funciton or not
+        # loss_func = QuantileLoss()
+        # # loss_func = WeightedMSELoss(weights_func=custom_weights)
+        #
+        # # Define the Temporal Fusion Transformer model
+        # tft = tft_with_ignore.from_dataset(
+        #     training,
+        #     learning_rate=1e-3,
+        #     hidden_size=32,  # Size of the hidden layer
+        #     attention_head_size=4,
+        #     dropout=0.2,
+        #     hidden_continuous_size=4,
+        #     # output_size=1,  # Will be 1 (not using quintiles)
+        #     output_size=7,
+        #     # loss=loss_func,
+        #     log_interval=10,
+        #     reduce_on_plateau_patience=4,
+        #     # optimizer='adam'
+        # )
+        # tft.loss = loss_func
+        #
+        # # Wrap the model in a PyTorch Lightning Trainer
+        # if training_label == 'dir_score':
+        #     max_epochs = 20
+        # else:
+        #     max_epochs = 15
+        #     pass
+        #
+        # trainer = Trainer(
+        #     accelerator='cpu',
+        #     max_epochs=max_epochs,
+        #     gradient_clip_val=0.1
+        # )
+        #
+        # # Train the model
+        # trainer.fit(tft, train_dataloader, val_dataloader)
+        #
+        # # Save the model after training
+        # checkpoint_filename = 'tft' + training_label + 'DailyCheckpoint.ckpt'
+        # trainer.save_checkpoint(checkpoint_filename)
 
         pass
 

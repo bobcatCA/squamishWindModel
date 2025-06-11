@@ -6,6 +6,7 @@ import pandas as pd
 import psutil
 # import threading
 import time
+import torch.serialization
 from pathlib import Path
 from dotenv import load_dotenv
 from updateWeatherData import get_conditions_table_hourly
@@ -70,7 +71,7 @@ def prepare_data():
     ###### For testing only ######
     # data = pd.read_csv('mergedOnSpeed_hourly.csv')
     # data.rename(columns={'time': 'datetime'}, inplace=True)
-    # data = data.loc[23794:25791].reset_index(drop=True)
+    # data = data.loc[25720:25780].reset_index(drop=True)
     # data.loc[len(data) - 8:, REAL_UNKNOWN_FEATURES] = np.nan
     # data.loc[len(data) - 8:, TARGET_VARIABLES] = np.nan
     ##############################
@@ -78,14 +79,14 @@ def prepare_data():
     # Pre-process data (fill missing, re-index)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
-    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].fillna(0)
+    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
     data.reset_index(drop=True, inplace=True)
     data['static'] = 'S'  # Required static group identifier
     data['time_idx'] = np.arange(data.shape[0])
     return data
 
 
-def load_model_and_predict(data, target, forecast_n=7, forecast_q=3):
+def load_model_and_predict(data, target, forecast_q=3):
     """
     :param data: Pandas dataframe, pre-processed
     :param target: Str, name of target (label) variable
@@ -94,55 +95,47 @@ def load_model_and_predict(data, target, forecast_n=7, forecast_q=3):
 
     # Load pre-trained checkpoint and generate PyTorch dataset object
     checkpoint_path = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
-    dataset = TimeSeriesDataSet(
+
+    # Load training dataset for parameters to pass into inference batch
+    with torch.serialization.safe_globals([TimeSeriesDataSet]):
+        training_dataset = torch.load(f'{target}_training_dataset_hourly.pkl', weights_only=False)
+
+    # Create inference dataset
+    inference_dataset = TimeSeriesDataSet.from_dataset(
+        training_dataset,
         data,
-        time_idx='time_idx',
-        target=target,
-        group_ids=['static'],
-        static_categoricals=['static'],
-        time_varying_known_categoricals=CATEGORICAL_FEATURES,
-        time_varying_known_reals=REAL_KNOWN_FEATURES,
-        time_varying_unknown_reals=[target] + REAL_UNKNOWN_FEATURES,
-        min_encoder_length=8,
-        max_encoder_length=MAX_ENCODER_LENGTH,
-        min_prediction_length=1,
-        max_prediction_length=MAX_PREDICTION_LENGTH,
-        target_normalizer=GroupNormalizer(groups=['static']),
-        add_relative_time_idx=True,
-        add_target_scales=True,
-        randomize_length=None
+        predict=True,
+        stop_randomization=True
     )
 
     # Generate a dataloader batch (entire dataset for inference pass)
-    batch = dataset.to_dataloader(train=False, batch_size=len(dataset), shuffle=False, num_workers=7)
+    batch = inference_dataset.to_dataloader(
+        train=False,
+        batch_size=len(inference_dataset),
+        shuffle=False,
+        num_workers=4
+    )
     model = tft_with_ignore.load_from_checkpoint(checkpoint_path)
 
     # Generate raw predictions, and extract from output
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)
-    datetime_idx = data['datetime']
-    pred_datetime = datetime_idx[raw_predictions.index['time_idx']].reset_index(drop=True)
-
-    # Predicted mean (3rd quantile out of 0-7)
-    y_pred_mean = pd.Series(
-        raw_predictions.output.prediction[:, forecast_n, forecast_q]
-    ).shift(periods=forecast_n)
+    datetime_measured = data['datetime']
+    pred_datetime_idx = raw_predictions.index['time_idx'].max()
+    y_pred_mean = raw_predictions.output.prediction[:, :, forecast_q].numpy().reshape(-1)
+    datetime_pred = data['datetime'].iloc[pred_datetime_idx:len(data)]
 
     # Pull out Q1 and Q7 for direction, lull, and gust (used later in ratings)
     if any(name in target for name in ['direction', 'lull', 'gust']):
-        y_pred_Q1 = pd.Series(
-            raw_predictions.output.prediction[:, forecast_n, 0]
-        ).shift(periods=forecast_n)
-        y_pred_Q7 = pd.Series(
-            raw_predictions.output.prediction[:, forecast_n, 6]
-        ).shift(periods=forecast_n)
+        y_pred_Q1 = raw_predictions.output.prediction[:, :, 0].numpy().reshape(-1)
+        y_pred_Q7 = raw_predictions.output.prediction[:, :, 6].numpy().reshape(-1)
         result_df = pd.DataFrame({
-            'datetime': pred_datetime,
+            'datetime': datetime_pred,
             target: y_pred_mean,
             f'{target}_Q1': y_pred_Q1,
             f'{target}_Q7': y_pred_Q7
         })
     else:
-        result_df = pd.DataFrame({'datetime': pred_datetime, target: y_pred_mean})
+        result_df = pd.DataFrame({'datetime': datetime_pred, target: y_pred_mean})
         pass
 
     return result_df
@@ -193,7 +186,7 @@ def main():
     df_transmit = pd.DataFrame()
 
     for target in TARGET_VARIABLES:
-        df_forecast = load_model_and_predict(data, target, forecast_n=0, forecast_q=3)
+        df_forecast = load_model_and_predict(data, target, forecast_q=4)
         if df_transmit.empty:
             df_transmit = df_forecast
         else:
