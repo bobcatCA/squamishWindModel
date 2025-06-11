@@ -39,10 +39,8 @@ def get_sws_df(dates):
 
         string1 = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate='
         string2 = '&reqtime=0'
-        # date = date + pd.Timedelta(days=1)
         url = string1 + str(date) + string2
         # Load the page
-        # url = 'https://squamishwindsports.com/wind-data/getmet.php?wind_src=spit&reqdate=2024-09-10&reqtime=0'
         driver.get(url)
 
         # Allow time for the page to fully load

@@ -80,7 +80,7 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     :param prediction_length: Int, number of time steps to predict/look forward
     :return: DataFrame, Concat'd with observed values from the past/upcoming days
     """
-    today_14 = pd.to_datetime(pd.Timestamp.now().date()) + pd.to_timedelta(14, 'hours')
+    today_14 = pd.to_datetime(pd.Timestamp.now(tz='America/Vancouver').date()) + pd.to_timedelta(14, 'hours')
     start_time = today_14 - timedelta(days=encoder_length)
     end_time = today_14 + timedelta(days=prediction_length - 1)
     time_values = pd.date_range(start=start_time, end=end_time, freq='d')
@@ -136,13 +136,11 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     df_weather_recent = pull_past_hrs_weather()
     past24_dates = list(df_weather_recent['datetime'].dt.date.unique().astype(str))
     df_sws = get_sws_df(past24_dates)  # TODO: uncomment v
-    # df_sws = get_sws_df(['2024-09-02', '2024-09-03'])  # TODO: Erase this once SWS weather station is up and running
-    # df_sws['datetime'] + pd.to_timedelta(198, 'days')  # TODO: Ditto
     df_recent = pd.merge_asof(df_weather_recent, df_sws, on='datetime', direction='nearest')
     update_sql_db_hourly(df_recent)
 
     # Make a new DF for the desired dates
-    now_time = pd.Timestamp.now().ceil('h')
+    now_time = pd.Timestamp.now(tz='America/Vancouver').ceil('h')
     start_time = now_time - timedelta(hours=encoder_length)
     end_time = now_time + timedelta(hours=prediction_length - 1)  # TODO: does this have to match the max_encoder_length exactly?
     time_values = pd.date_range(start=start_time, end=end_time, freq='h')
