@@ -78,8 +78,10 @@ def prepare_data():
 
     # Pre-process data (fill missing, re-index)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
-    data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
+    data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
+    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].bfill(limit=1)
+    data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].bfill(limit=1)
     data.reset_index(drop=True, inplace=True)
     data['static'] = 'S'  # Required static group identifier
     data['time_idx'] = np.arange(data.shape[0])
