@@ -149,7 +149,6 @@ def save_forecast(df_transmit, output_path):
     :param output_path: (Path): Path to save the CSV file.
     :return:
     """
-    df_transmit['datetime'] = df_transmit['datetime'].dt.date
     df_transmit.to_csv(output_path, index=False)
     return df_transmit
 
