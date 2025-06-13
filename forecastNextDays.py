@@ -8,8 +8,10 @@ import random
 import threading
 import time
 import torch
-from pathlib import Path
+import pytz
+from datetime import datetime
 from dotenv import load_dotenv
+from pathlib import Path
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 from pytorch_forecasting.data import GroupNormalizer
 from updateWeatherData import get_conditions_table_daily
@@ -199,7 +201,15 @@ if __name__ == '__main__':
     # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
     # monitor_thread.start()
 
+    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    local_tz = pytz.timezone('America/Vancouver')
+    start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    print(f'Daily wind prediction task started at {start_time}')
+
     main()
+
+    end_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    print(f'Daily prediction task complete at {end_time}')
 
     # Sleep 1ms to let the logger finish the last write
     # time.sleep(0.5)

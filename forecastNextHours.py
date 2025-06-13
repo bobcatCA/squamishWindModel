@@ -4,9 +4,11 @@ import numpy as np
 import os
 import pandas as pd
 import psutil
+import pytz
 # import threading
 import time
 import torch.serialization
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from updateWeatherData import get_conditions_table_hourly
@@ -183,7 +185,6 @@ def plot_measured_forecast(df_measured, df_forecast):
 
 
 def main():
-    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     data = prepare_data()
     df_transmit = pd.DataFrame()
 
@@ -209,8 +210,16 @@ if __name__ == '__main__':
     # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
     # monitor_thread.start()
 
+    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    local_tz = pytz.timezone('America/Vancouver')
+    start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    print(f'Hourly wind prediction task started at {start_time}')
+
     # Run the main function
     main()
+
+    end_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    print(f'Hourly prediction task complete at {end_time}')
 
     # Sleep 1ms to let the logger finish the last write (uncomment if using monitor_resources)
     # time.sleep(0.5)

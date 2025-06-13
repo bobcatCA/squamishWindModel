@@ -1,6 +1,8 @@
+from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+import pytz
 import subprocess
 
 
@@ -20,23 +22,29 @@ def send_file_via_scp(local_path, remote_user, remote_host, remote_path):
     :param remote_path: Str, path to save file on remote machine
     :return: None
     """
-    scp_command = ["scp", local_path, f"{remote_user}@{remote_host}:{remote_path}"]
-    print(f"[>] Sending {local_path} to {remote_user}@{remote_host}:{remote_path}")
+    scp_command = ['scp', local_path, f'{remote_user}@{remote_host}:{remote_path}']
+    print(f'[>] Sending {local_path} to {remote_user}@{remote_host}:{remote_path}')
     result = subprocess.run(scp_command, capture_output=True, text=True)
 
     if result.returncode == 0:
-        print("[✓] File sent successfully!")
+        print('File sent successfully!')
     else:
-        print("[✗] Failed to send file.")
-        print("stderr:", result.stderr)
+        print('[✗] Failed to send file.')
+        print('stderr:', result.stderr)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # Display time of started task (for troubleshooting/logging)
+    local_tz = pytz.timezone("America/Vancouver")
+    start_time = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
+    print(f'File remote transmission task started at {start_time}')
+
     json_filenames = ['hourly_speed_predictions.json', 'daily_speed_predictions.json']
+
     for file in json_filenames:
         json_file = JSON_PATH / file
         remote_dir = REMOTE_PATH / file
         send_file_via_scp(json_file, REMOTE_USER, REMOTE_HOST, remote_dir)
         # os.remove(json_file)  # Clean up the local JSON file
-        # print("[✓] Done.")
+        # print('[✓] Done.')
         pass
