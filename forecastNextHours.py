@@ -98,11 +98,12 @@ def load_model_and_predict(data, target, forecast_q=3):
     """
 
     # Load pre-trained checkpoint and generate PyTorch dataset object
-    checkpoint_path = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
+    checkpoint_model = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
+    checkpoint_training_dataset = WORKING_DIRECTORY / f'{target}_training_dataset_hourly.pkl'
 
     # Load training dataset for parameters to pass into inference batch
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
-        training_dataset = torch.load(f'{target}_training_dataset_hourly.pkl', weights_only=False)
+        training_dataset = torch.load(checkpoint_training_dataset, weights_only=False)
 
     # Create inference dataset
     inference_dataset = TimeSeriesDataSet.from_dataset(
@@ -119,7 +120,7 @@ def load_model_and_predict(data, target, forecast_q=3):
         shuffle=False,
         num_workers=4
     )
-    model = tft_with_ignore.load_from_checkpoint(checkpoint_path)
+    model = tft_with_ignore.load_from_checkpoint(checkpoint_model)
 
     # Generate raw predictions, and extract from output
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)

@@ -96,8 +96,9 @@ def build_prediction_dataset(input_dataframe, target_variable):
     """
 
     # Load training dataset for parameters to pass into inference batch
+    training_dataset_checkpoint = WORKING_DIRECTORY / f'{target_variable}_training_dataset_daily.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
-        training_dataset = torch.load(f'{target_variable}_training_dataset_daily.pkl', weights_only=False)
+        training_dataset = torch.load(training_dataset_checkpoint, weights_only=False)
 
     # Create inference dataset
     inference_dataset = TimeSeriesDataSet.from_dataset(
