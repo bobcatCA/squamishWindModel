@@ -81,6 +81,7 @@ def prepare_data():
     # Pre-process data (fill missing, re-index)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
+    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
     data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
     data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].bfill(limit=1)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].bfill(limit=1)

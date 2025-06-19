@@ -79,6 +79,7 @@ def prepare_data():
     # ##############################
 
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
+    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
     data.reset_index(drop=True, inplace=True)
     data['static'] = 'S'  # Required static group
