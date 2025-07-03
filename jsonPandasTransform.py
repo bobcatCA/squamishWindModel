@@ -5,7 +5,7 @@ import os
 import pandas as pd
 
 # Initialize a start date and empty lists to hold the data we pull from Json files
-startDate = pd.to_datetime('2016-05-05').date()
+startDate = pd.to_datetime('2025-05-05').date()
 date = startDate
 swsDate = []
 swsSpeed = []
@@ -47,4 +47,4 @@ df_swsData['lull'] = pd.to_numeric(swsLull, errors='coerce').astype(np.float32)
 df_swsData['temperature'] = pd.to_numeric(swsTemp, errors='coerce').astype(np.float32)
 
 # Save to csv
-df_swsData.to_csv('swsWind.csv')
+df_swsData.to_csv('swsWind_2025.csv')

@@ -1,6 +1,7 @@
 import json
 import pandas as pd
 import platform
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -99,6 +100,13 @@ def get_sws_df(dates):
     return df
 
 if __name__=='__main__':
-    # date_of_query = '2024-09-10'
-    # df_sws = get_sws_df(date_of_query)
+    start = '2025-05-01'
+    end = '2025-07-02'
+
+    start_date = datetime.strptime(start, "%Y-%m-%d")
+    end_date = datetime.strptime(end, "%Y-%m-%d")
+
+    date_list = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+                 for i in range((end_date - start_date).days + 1)]
+    df_sws = get_sws_df(date_list)
     pass

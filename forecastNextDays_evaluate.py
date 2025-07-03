@@ -5,15 +5,17 @@ import os
 import pandas as pd
 import psutil
 import random
+import sqlite3
 import threading
 import time
 import torch
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 from pytorch_forecasting.data import GroupNormalizer
+from transformDataDaily import add_scores_to_df
 from updateWeatherData import get_conditions_table_daily
 
 
@@ -60,31 +62,48 @@ def monitor_resources(interval=1, log_file='daily_forecast_resource_log.txt'):
                 break
 
 
-def prepare_data():
+def prepare_data(start_time, encoder_length=MAX_ENCODER_LENGTH, prediction_length=MAX_PREDICTION_LENGTH):
     """
     Fetch and preprocess the weather data for forecasting.
 
     :return: DataFrame: A prepared dataframe ready for model ingestion.
     """
-    # Compile HTML-scraped weather data and pre-process
-    data = get_conditions_table_daily()
+    start_time_14 = pd.to_datetime(start_time) + pd.to_timedelta(14, 'hours')
+    query_start_14 = start_time_14 - timedelta(days=encoder_length)
+    end_time_14 = start_time_14 + timedelta(days=prediction_length)
+    time_values = pd.date_range(start=query_start_14, end=end_time_14, freq='d')
 
-    ##### For testing only ######
-    # data = pd.read_csv('mergedOnSpeed_daily.csv')
-    # # data.rename(columns={'time': 'datetime'}, inplace=True)
-    # data = data.loc[55:70].reset_index(drop=True)
-    # data.dropna(thresh=14, inplace=True)
-    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, REAL_UNKNOWN_FEATURES] = np.nan
-    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, TARGET_VARIABLES] = np.nan
-    # ##############################
+    # Get corresponding recent data from SQL server
+    sql_database_path = WORKING_DIRECTORY / 'weather_data_hourly.db'
+    conn = sqlite3.connect(sql_database_path)
+    # df_query = pd.read_sql_query('SELECT * FROM weather WHERE datetime >= ?', conn, params=(query_start_14.timestamp(), ))
+    df_query = pd.read_sql_query('SELECT * FROM weather', conn)
+    df_query['datetime'] = df_query['datetime'].astype('datetime64[s]')
+    df_query['datetime'] = df_query['datetime'].dt.tz_localize('America/Vancouver')
+    conn.close()
 
-    data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
-    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
-    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
-    data.reset_index(drop=True, inplace=True)
-    data['static'] = 'S'  # Required static group
-    data['time_idx'] = np.arange(data.shape[0])
-    return data
+    # Merge SQL data with desired date range
+    df_encoder = pd.DataFrame()
+    df_encoder['datetime'] = time_values
+    df_encoder = df_encoder.merge(df_query, on='datetime', how='left')
+
+    # Add in the Quality scores, these are daily labels to predict
+    df_ratings = add_scores_to_df(df_encoder)
+    df_encoder = df_encoder.merge(df_ratings, on='datetime', how='left')
+    df_encoder['year_fraction'] = ((df_encoder['datetime'].dt.month - 1) * 30.416 + df_encoder['datetime'].dt.day - 1) / 365
+
+    # Pre-process data (fill missing, re-index)
+    df_measured_targets = df_encoder.loc[encoder_length:(encoder_length + prediction_length), TARGET_VARIABLES + ['datetime']]
+    df_encoder.loc[encoder_length:(encoder_length + prediction_length), REAL_UNKNOWN_FEATURES] = 0
+    df_encoder.loc[encoder_length:(encoder_length + prediction_length), TARGET_VARIABLES] = 0
+    df_encoder[REAL_KNOWN_FEATURES] = df_encoder[REAL_KNOWN_FEATURES].ffill(limit=2)
+    df_encoder[CATEGORICAL_FEATURES] = df_encoder[CATEGORICAL_FEATURES].bfill(limit=2)
+    df_encoder[REAL_KNOWN_FEATURES] = df_encoder[REAL_KNOWN_FEATURES].bfill(limit=2)
+    df_encoder[REAL_UNKNOWN_FEATURES] = df_encoder[REAL_UNKNOWN_FEATURES].bfill(limit=2)
+    df_encoder.reset_index(drop=True, inplace=True)
+    df_encoder['static'] = 'S'  # Required static group identifier
+    df_encoder['time_idx'] = np.arange(df_encoder.shape[0])
+    return df_encoder, df_measured_targets
 
 
 def build_prediction_dataset(input_dataframe, target_variable):
@@ -157,9 +176,9 @@ def save_forecast(df_transmit, output_path):
     return df_transmit
 
 
-def plot_measured_forecast(df_measured, df_forecast):
-    date_measured = df_measured['datetime']
-    speed_measured = df_measured['speed']
+def plot_measured_forecast(df_observed, df_forecast):
+    date_measured = df_observed['datetime']
+    speed_measured = df_observed['speed']
 
     date_forecast = df_forecast['datetime']
     speed_forecast = df_forecast['speed']
@@ -174,44 +193,25 @@ def plot_measured_forecast(df_measured, df_forecast):
 
 
 def main():
-    # Load data from HTML scraper
-    output_csv = WORKING_DIRECTORY / 'daily_speed_predictions.csv'
-    df_encoder = prepare_data()
-    df_predict = pd.DataFrame()
+    begin_time = pd.Timestamp('2025-Jun-21', tz='America/Vancouver')
 
-    # Loop through targets and predict for each
-    for target in TARGET_VARIABLES:
-        prediction_dataset = build_prediction_dataset(df_encoder, target)
-        df_target = predict_and_store(df_encoder, prediction_dataset, target, forecast_q=4)
-        if df_predict.empty:
-            df_predict = df_target
-        else:
-            df_predict = df_predict.merge(df_target, on='datetime', how='outer')
+    while(True):
+        begin_time = begin_time + timedelta(days=1)
+        df_encoder, df_measured = prepare_data(begin_time)
+        df_predict = pd.DataFrame()
 
-    # Save to CSV and finish script
-    df_save = save_forecast(df_predict, output_csv)
-    df_save.to_json(WORKING_DIRECTORY / f'daily_speed_predictions.json', orient='records', lines=True)
-    # plot_measured_forecast(df_encoder, df_predict)
+        # Loop through targets and predict for each
+        for target in TARGET_VARIABLES:
+            prediction_dataset = build_prediction_dataset(df_encoder, target)
+            df_target = predict_and_store(df_encoder, prediction_dataset, target, forecast_q=3)
+            if df_predict.empty:
+                df_predict = df_target
+            else:
+                df_predict = df_predict.merge(df_target, on='datetime', how='outer')
 
-    # # Save as HTML table
-    # html_table_daily = df_predict.to_html()
-    # with open('df_forecast_daily.html', 'w') as f:
-    #     f.write(html_table_daily)
+        plot_measured_forecast(df_measured, df_predict)
+        pass
 
 if __name__ == '__main__':
-    # Start monitoring in a background thread
-    # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
-    # monitor_thread.start()
-
-    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
-    local_tz = pytz.timezone('America/Vancouver')
-    start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
-    print(f'Daily wind prediction task started at {start_time}')
-
     main()
-
-    end_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
-    print(f'Daily prediction task complete at {end_time}')
-
-    # Sleep 1ms to let the logger finish the last write
-    # time.sleep(0.5)
+    pass
