@@ -212,7 +212,7 @@ if __name__ == '__main__':
     # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
     # monitor_thread.start()
 
-    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     local_tz = pytz.timezone('America/Vancouver')
     start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
     print(f'Hourly wind prediction task started at {start_time}')

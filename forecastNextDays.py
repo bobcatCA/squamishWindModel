@@ -111,13 +111,13 @@ def build_prediction_dataset(input_dataframe, target_variable):
     return inference_dataset
 
 
-def predict_and_store(input_dataset, pytorch_dataset, target, forecast_q=3):
+def predict_and_store(input_dataset, pytorch_dataset, target, forecast_q=4):
     """
     :param input_dataset: (pd.DataFrame): Original data.
     :param pytorch_dataset:  (PyTorch TimeSeriesDataSet): Dataset for prediction.
     :param target: (str): Target variable name.
     :param forecast_n: Forecast step index (0...n, 0=present).
-    :param forecast_q:  Quantile index (0...n).
+    :param :  Quantile index (0...n).
     :return: pd.DataFrame: DataFrame with datetime and prediction columns.
     """
 
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
     # monitor_thread.start()
 
-    logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
+    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
     local_tz = pytz.timezone('America/Vancouver')
     start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
     print(f'Daily wind prediction task started at {start_time}')
