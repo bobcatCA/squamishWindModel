@@ -24,13 +24,15 @@ data['static'] = 'S'  # Put a static data column into the df (required for train
 data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
 # Split the data into training and validation
-max_encoder_length = 50  # Number of past observations
+max_encoder_length = 12  # Number of past observations
 max_prediction_length = 8  # Number of future steps you want to predict
 training_cutoff = data['time_idx'].max() - max_prediction_length
 
 # Build the variables that form the basis of the model architecture
 training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+# training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+#                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
+training_features_reals_known = ['comoxDegC', 'lillooetDegC',
                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each

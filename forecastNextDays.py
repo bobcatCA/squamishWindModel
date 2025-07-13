@@ -32,7 +32,7 @@ MAX_PREDICTION_LENGTH = 5  # Number of future steps to predict
 
 # Model architecture features
 CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-REAL_KNOWN_FEATURES = ['year_fraction', 'comoxDegC', 'lillooetDegC',
+REAL_KNOWN_FEATURES = ['comoxDegC', 'lillooetDegC',
                                      'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 TARGET_VARIABLES = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each

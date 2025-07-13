@@ -24,12 +24,12 @@ class tft_with_ignore(TemporalFusionTransformer):
 # Load environment and global variables
 load_dotenv()
 WORKING_DIRECTORY = Path(os.getenv('WORKING_DIRECTORY'))
-MAX_ENCODER_LENGTH = 50  # Number of past observations to feed in
+MAX_ENCODER_LENGTH = 18  # Number of past observations to feed in
 MAX_PREDICTION_LENGTH = 8  # Number of future steps to predict
 
 # Model architecture features
 CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-REAL_KNOWN_FEATURES = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+REAL_KNOWN_FEATURES = ['comoxDegC', 'lillooetDegC',
                        'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 TARGET_VARIABLES = ['speed', 'gust', 'lull', 'direction']  # Each will have a separate model
@@ -91,7 +91,7 @@ def prepare_data():
     return data
 
 
-def load_model_and_predict(data, target, forecast_q=3):
+def load_model_and_predict(data, target, forecast_q=4):
     """
     :param data: Pandas dataframe, pre-processed
     :param target: Str, name of target (label) variable
@@ -191,7 +191,7 @@ def main():
     df_transmit = pd.DataFrame()
 
     for target in TARGET_VARIABLES:
-        df_forecast = load_model_and_predict(data, target, forecast_q=5)
+        df_forecast = load_model_and_predict(data, target, forecast_q=4)
         if df_transmit.empty:
             df_transmit = df_forecast
         else:
