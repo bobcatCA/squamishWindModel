@@ -22,6 +22,7 @@ time_series = data['time'].reset_index(drop=True)  # Save for later, so we have 
 data = data.drop(columns=['time'])  # Drop for feeding into training model (TODO: is this necessary?)
 data['static'] = 'S'  # Put a static data column into the df (required for training)
 data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
+data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
 # Split the data into training and validation
 max_encoder_length = 12  # Number of past observations
@@ -78,21 +79,21 @@ for training_label in training_labels:
     # # loss_func = WeightedMSELoss(weights_func=custom_weights)
     #
     # # Define the Temporal Fusion Transformer model
-    # tft = tft_with_ignore.from_dataset(
-    #     training,
-    #     learning_rate=1e-3,
-    #     hidden_size=64,  # Size of the hidden layer
-    #     attention_head_size=4,
-    #     dropout=0.2,
-    #     hidden_continuous_size=4,
-    #     # output_size=1,  # Will be 1 (not using quintiles)
-    #     output_size=7,
-    #     # loss=loss_func,
-    #     logging_metrics=[],
-    #     log_interval=10,
-    #     reduce_on_plateau_patience=4,
-    #     # optimizer='adam'
-    # )
+    tft = tft_with_ignore.from_dataset(
+        training,
+        learning_rate=1e-3,
+        hidden_size=64,  # Size of the hidden layer
+        attention_head_size=4,
+        dropout=0.2,
+        hidden_continuous_size=4,
+        # output_size=1,  # Will be 1 (not using quintiles)
+        output_size=7,
+        # loss=loss_func,
+        logging_metrics=[],
+        log_interval=10,
+        reduce_on_plateau_patience=4,
+        # optimizer='adam'
+    )
     # tft.loss = loss_func
     #
     # # Wrap the model in a PyTorch Lightning Trainer

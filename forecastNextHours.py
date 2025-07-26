@@ -24,17 +24,18 @@ class tft_with_ignore(TemporalFusionTransformer):
 # Load environment and global variables
 load_dotenv()
 WORKING_DIRECTORY = Path(os.getenv('WORKING_DIRECTORY'))
-MAX_ENCODER_LENGTH = 18  # Number of past observations to feed in
+MAX_ENCODER_LENGTH = 12  # Number of past observations to feed in
 MAX_PREDICTION_LENGTH = 8  # Number of future steps to predict
 
 # Model architecture features
-CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-REAL_KNOWN_FEATURES = ['comoxDegC', 'lillooetDegC',
-                       'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
+CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky', 'is_daytime']
+REAL_KNOWN_FEATURES = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
+                       'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC'
+                       ]
+REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa',
+                         'lillooetKPa', 'pamKPa', 'ballenasKPa'
+                         ]
 TARGET_VARIABLES = ['speed', 'gust', 'lull', 'direction']  # Each will have a separate model
-# TARGET_VARIABLES = ['speed']  # Each will have a separate model
-
 
 def monitor_resources(interval=1, log_file='hourly_forecast_resource_log.txt'):
     """
@@ -79,6 +80,7 @@ def prepare_data():
     ##############################
 
     # Pre-process data (fill missing, re-index)
+    data['hour'] = data['datetime'].dt.hour
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
     data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
@@ -86,7 +88,8 @@ def prepare_data():
     data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].bfill(limit=1)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].bfill(limit=1)
     data.reset_index(drop=True, inplace=True)
-    data['static'] = 'S'  # Required static group identifier
+    # data['static'] = 'S'  # Required static group identifier
+    data['static'] = 'S'
     data['time_idx'] = np.arange(data.shape[0])
     return data
 
@@ -101,6 +104,8 @@ def load_model_and_predict(data, target, forecast_q=4):
     # Load pre-trained checkpoint and generate PyTorch dataset object
     checkpoint_model = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
     checkpoint_training_dataset = WORKING_DIRECTORY / f'{target}_training_dataset_hourly.pkl'
+    # checkpoint_model = WORKING_DIRECTORY / f'speed_tft_hourly.pkl'
+    # checkpoint_training_dataset = WORKING_DIRECTORY / f'speed_training_dataset_hourly.pkl'
 
     # Load training dataset for parameters to pass into inference batch
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
@@ -127,7 +132,8 @@ def load_model_and_predict(data, target, forecast_q=4):
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)
     datetime_measured = data['datetime']
     pred_datetime_idx = raw_predictions.index['time_idx'].max()
-    y_pred_mean = raw_predictions.output.prediction[:, :, forecast_q].numpy().reshape(-1)
+    y_pred_mean = raw_predictions.output.prediction[:, :, forecast_q].numpy().reshape(-1)  # For Quantile
+    y_pred = raw_predictions.output.prediction[:, :, :].numpy().reshape(-1)
     datetime_pred = data['datetime'].iloc[pred_datetime_idx:len(data)]
 
     # Pull out Q1 and Q7 for direction, lull, and gust (used later in ratings)

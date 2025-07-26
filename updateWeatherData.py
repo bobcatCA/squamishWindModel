@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import pandas as pd
+import pytz
 import sqlite3
 from datetime import timedelta
 from dotenv import load_dotenv
@@ -37,7 +38,9 @@ def update_sql_db_hourly(df):
     df = df[sql_columns]  # Remove any columns from df that don't exist in SQL database
 
     # Convert DataFrame to a list of tuples, and use Unix timestamps
-    df['datetime'] = (df['datetime'] - pd.Timestamp('1970-01-01', tz='America/Vancouver')) // pd.Timedelta('1s')
+    # df['datetime'] = (df['datetime'] - pd.Timestamp('1970-01-01', tz='America/Vancouver')) // pd.Timedelta('1s')
+    df['datetime'] = df['datetime'].dt.tz_convert('UTC')
+    df['datetime'] = df['datetime'].astype('int64') // 10**9
     data = list(df.itertuples(index=False, name=None))
 
     # Create INSERT OR IGNORE query dynamically
@@ -88,8 +91,8 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     # Get corresponding recent data from SQL server
     conn = sqlite3.connect(sql_database_path)
     df_encoder = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(start_time.timestamp(), ))
-    df_encoder['datetime'] = df_encoder['datetime'].astype('datetime64[s]')
-    df_encoder['datetime'] = df_encoder['datetime'].dt.tz_localize('America/Vancouver')
+    df_encoder['datetime'] = pd.to_datetime(df_encoder['datetime'], unit='s', utc=True)
+    df_encoder['datetime'] = df_encoder['datetime'].dt.tz_convert('America/Vancouver')
     conn.close()
 
     # Merge SQL data with desired date range
@@ -106,6 +109,7 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     df_forecast = pull_forecast_daily(time_values)
     df = pd.concat([df, df_forecast])
     df['year_fraction'] = ((df['datetime'].dt.month - 1) * 30.416 + df['datetime'].dt.day - 1) / 365
+    print('pause')
 
     # Categorize weather columns into 'Fair', 'Mostly Cloudy', 'Cloudy', and 'Other'
     df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['Clear',
@@ -128,7 +132,7 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     return df
 
 
-def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
+def get_conditions_table_hourly(encoder_length=12, prediction_length=8):
     """
     :param encoder_length: Int, number of time steps to look back/encode
     :param prediction_length: Int, number of time steps to predict/look forward
@@ -151,8 +155,8 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     # Get the recent data from SQL DB, per the encoder_length (df_recent may be smaller than encoder_length)
     conn = sqlite3.connect(sql_database_path)
     df_encoder = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(start_time.timestamp(), ))
-    df_encoder['datetime'] = df_encoder['datetime'].astype('datetime64[s]')
-    df_encoder['datetime'] = df_encoder['datetime'].dt.tz_localize('America/Vancouver')
+    df_encoder['datetime'] = pd.to_datetime(df_encoder['datetime'], unit='s', utc=True)
+    df_encoder['datetime'] = df_encoder['datetime'].dt.tz_convert('America/Vancouver')
 
     # Pull forecast data and put the two dataframes together
     df_forecast = pull_forecast_hourly()
@@ -168,6 +172,8 @@ def get_conditions_table_hourly(encoder_length=50, prediction_length=8):
     # Add calculated columns
     df['sin_hour'] = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
     df['year_fraction'] = ((df['datetime'].dt.month - 1) * 30.416 + df['datetime'].dt.day - 1) / 365
+    df['is_daytime'] = df['datetime'].dt.hour.between(10, 17).astype(str)
+    df['is_thermal'] = ((df['lillooetDegC'] - df['vancouverDegC']) > 5).astype(str)
 
     # Categorize weather columns into 'Fair', 'Mostly Cloudy', 'Cloudy', and 'Other'
     df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['Clear',
