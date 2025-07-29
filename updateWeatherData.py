@@ -5,6 +5,8 @@ import pytz
 import sqlite3
 from datetime import timedelta
 from dotenv import load_dotenv
+from pandas import DataFrame
+
 from envCanadaForecastPull import pull_forecast_hourly, pull_forecast_daily
 from envCanadaStationPull import pull_past_hrs_weather
 from pathlib import Path
@@ -132,7 +134,7 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     return df
 
 
-def get_conditions_table_hourly(encoder_length=12, prediction_length=8):
+def get_conditions_table_hourly(encoder_length: object = 12, prediction_length: object = 8, specified_start: object = None) -> DataFrame:
     """
     :param encoder_length: Int, number of time steps to look back/encode
     :param prediction_length: Int, number of time steps to predict/look forward
@@ -145,8 +147,14 @@ def get_conditions_table_hourly(encoder_length=12, prediction_length=8):
     df_recent = pd.merge_asof(df_weather_recent, df_sws, on='datetime', direction='nearest')
     update_sql_db_hourly(df_recent)
 
+    # Start from now, or specified time (if testing for previous dates)
+    if specified_start:
+        now_time = specified_start
+
+    else:
+        now_time = pd.Timestamp.now(tz='America/Vancouver').ceil('h')
+
     # Make a new DF for the desired dates
-    now_time = pd.Timestamp.now(tz='America/Vancouver').ceil('h')
     start_time = now_time - timedelta(hours=encoder_length)
     end_time = now_time + timedelta(hours=prediction_length - 1)  # TODO: does this have to match the max_encoder_length exactly?
     time_values = pd.date_range(start=start_time, end=end_time, freq='h')

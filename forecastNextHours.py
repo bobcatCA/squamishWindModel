@@ -28,12 +28,14 @@ MAX_ENCODER_LENGTH = 12  # Number of past observations to feed in
 MAX_PREDICTION_LENGTH = 8  # Number of future steps to predict
 
 # Model architecture features
-CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky', 'is_daytime']
-REAL_KNOWN_FEATURES = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
-                       'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC'
+# CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky', 'is_daytime']
+CATEGORICAL_FEATURES = []
+REAL_KNOWN_FEATURES = [
+    'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'whistlerDegC',
+    'sin_hour'
                        ]
-REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa',
-                         'lillooetKPa', 'pamKPa', 'ballenasKPa'
+REAL_UNKNOWN_FEATURES = [
+    'comoxKPa', 'pamKPa'
                          ]
 TARGET_VARIABLES = ['speed', 'gust', 'lull', 'direction']  # Each will have a separate model
 
@@ -68,7 +70,7 @@ def prepare_data():
     # Get raw data from HTML scrapers and local database
     data = get_conditions_table_hourly(
         encoder_length=MAX_ENCODER_LENGTH,
-        prediction_length=MAX_PREDICTION_LENGTH
+        prediction_length=MAX_PREDICTION_LENGTH,
     )
 
     ###### For testing only ######

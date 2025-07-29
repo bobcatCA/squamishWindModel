@@ -19,12 +19,13 @@ class tft_with_ignore(TemporalFusionTransformer):
 
 data = pd.read_csv('training_dataset_hourly.csv')  # Assuming you have your data in a CSV
 # data = data[20000:26599]  # Subset to reduce compute time
-gpu_or_cpu = 'cpu'
+gpu_or_cpu = 'gpu'
 
 # Process the timestamps: Sort, format, re-index, introduce static column
 data['time'] = pd.to_datetime(data['time'])  # Ensure it's in DateTime format
 data['is_daytime'] = data['is_daytime'].astype(str)  # Needs to be type str to be a gategorical
 data['is_thermal'] = data['is_thermal'].astype(str)
+data['hour'] = data['hour'].astype(str)
 data = data.sort_values('time')  # Sort chronologically (if not already)
 time_series = data['time'].reset_index(drop=True)  # Save for later, so we have a real time index to plot against
 data = data.drop(columns=['time'])  # Drop for feeding into training model (TODO: is this necessary?)
@@ -37,14 +38,18 @@ max_prediction_length = 8  # Number of future steps you want to predict
 training_cutoff = data['time_idx'].max() - 2 * (max_encoder_length + max_prediction_length)
 
 # Build the variables that form the basis of the model architecture
-training_groups = ['static', 'is_daytime', 'is_thermal']
-# training_groups = ['static']
-training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky', 'is_daytime']
-training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
-                                 'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-# training_features_reals_known = ['comoxDegC', 'lillooetDegC',
+# training_groups = ['static', 'is_daytime', 'is_thermal']
+training_groups = ['static']
+training_features_categorical = []
+# training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky',
+#                                  'whistlerSky', 'hour', 'is_daytime', 'is_thermal',
+#                                  ]
+# training_features_reals_known = ['sin_hour', 'year_fraction', 'comoxDegC', 'lillooetDegC',
 #                                  'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
+training_features_reals_known = ['lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'whistlerDegC', 'sin_hour'
+                                 ]
+training_features_reals_unknown = ['comoxKPa', 'pamKPa']
+# training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
 training_labels = ['speed', 'gust', 'lull', 'direction']  # Multiple targets - have to make a model for each
 
 # Loop through each label and make a model for each
@@ -56,9 +61,9 @@ for training_label in training_labels:
         time_idx='time_idx',  # Must be index = 0, 1, 2, ..... , n
         target=training_label,
         group_ids=training_groups,
-        categorical_encoders={
-            'is_daytime': NaNLabelEncoder().fit(data['is_daytime'])
-        },
+        # categorical_encoders={
+        #     'hour': NaNLabelEncoder().fit(data['hour'])
+        # },
         static_categoricals=['static'],  # Just a dummy set to have one static
         time_varying_known_categoricals=training_features_categorical,
         time_varying_known_reals=training_features_reals_known,  # Real Inputs: temperature, presssure, humidity, etc.
@@ -132,7 +137,7 @@ for training_label in training_labels:
         learning_rate=optimal_lr,
         hidden_size=64,  # Size of the hidden layer
         attention_head_size=4,
-        dropout=0.2,
+        dropout=0.1,
         hidden_continuous_size=32,
         # output_size=1,  # Will be 1 (not using quintiles)
         output_size=7,
