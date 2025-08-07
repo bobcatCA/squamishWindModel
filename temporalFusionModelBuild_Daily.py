@@ -26,10 +26,13 @@ if __name__=='__main__':
     training_cutoff = data['time_idx'].max() - max_prediction_length
 
     # Build the variables that form the basis of the model architecture
-    training_features_categorical = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky'] 
-    training_features_reals_known = ['comoxDegC', 'lillooetDegC',
-                                     'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-    training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
+    training_features_categorical = []
+    training_features_reals_known = [
+        'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'whistlerDegC', 'year_fraction'
+                                     ]
+    training_features_reals_unknown = [
+        'comoxKPa', 'pamKPa'
+                                       ]
     training_labels = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
 
     # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model

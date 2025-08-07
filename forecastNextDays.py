@@ -111,7 +111,7 @@ def build_prediction_dataset(input_dataframe, target_variable):
     return inference_dataset
 
 
-def predict_and_store(input_dataset, pytorch_dataset, target, forecast_q=4):
+def predict_and_store(input_dataset, pytorch_dataset, target, forecast_q=3):
     """
     :param input_dataset: (pd.DataFrame): Original data.
     :param pytorch_dataset:  (PyTorch TimeSeriesDataSet): Dataset for prediction.
@@ -182,7 +182,7 @@ def main():
     # Loop through targets and predict for each
     for target in TARGET_VARIABLES:
         prediction_dataset = build_prediction_dataset(df_encoder, target)
-        df_target = predict_and_store(df_encoder, prediction_dataset, target, forecast_q=4)
+        df_target = predict_and_store(df_encoder, prediction_dataset, target, forecast_q=3)
         if df_predict.empty:
             df_predict = df_target
         else:
