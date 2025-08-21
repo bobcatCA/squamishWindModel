@@ -1,22 +1,19 @@
-import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
 import psutil
-import pytz
-# import threading
+import sqlite3
 import time
 import torch.serialization
-from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from updateWeatherData import get_conditions_table_hourly
-from pytorch_forecasting import (TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer)
+from pytorch_forecasting import (TimeSeriesDataSet, TemporalFusionTransformer)
+from transformDataDaily import add_scores_to_df
 
 
 # This class was necessary to ignore the loss loading from the Checkpoint (apparently can cause problems)
-class tft_with_ignore(TemporalFusionTransformer):
+class TftWithIgnore(TemporalFusionTransformer):
     def __init__(self, *args, **kwargs):
         self.save_hyperparameters(ignore=['loss'])  # Now this works as expected
         super().__init__(*args, **kwargs)
@@ -61,28 +58,30 @@ def monitor_resources(interval=1, log_file='hourly_forecast_resource_log.txt'):
                 break
 
 
-def prepare_data():
+def prepare_data(data):
     """
     Fetches and prepares hourly weather data for inference.
     :return: pd.DataFrame: Cleaned and formatted dataframe ready for prediction.
     """
+    #
+    # # Get raw data from local database
+    # sql_database_path = Path(os.getenv('WORKING_DIRECTORY')) / 'weather_data_hourly.db'
+    # conn = sqlite3.connect(sql_database_path)
+    #
+    # # Get existing table column names, keep only those matching, and commit.
+    # data = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(beginning_timestamp.timestamp(), ))
+    # conn.close()
 
-    # Get raw data from HTML scrapers and local database
-    data = get_conditions_table_hourly(
-        encoder_length=MAX_ENCODER_LENGTH,
-        prediction_length=MAX_PREDICTION_LENGTH,
-    )
-
-    ###### For testing only ######
-    # data = pd.read_csv('mergedOnSpeed_hourly.csv')
-    # data.rename(columns={'time': 'datetime'}, inplace=True)
-    # data = data.loc[25720:25780].reset_index(drop=True)
-    # data.loc[len(data) - 8:, REAL_UNKNOWN_FEATURES] = np.nan
-    # data.loc[len(data) - 8:, TARGET_VARIABLES] = np.nan
-    ##############################
+    # Add calculated columns
+    data['datetime'] = pd.to_datetime(data['datetime'], unit='s', utc=True)
+    data['datetime'] = data['datetime'].dt.tz_convert('America/Vancouver')
+    data['hour'] = data['datetime'].dt.hour
+    data['sin_hour'] = np.sin(2 * np.pi * data['datetime'].dt.hour / 24)
+    data['year_fraction'] = ((data['datetime'].dt.month - 1) * 30.416 + data['datetime'].dt.day - 1) / 365
+    data['is_daytime'] = data['datetime'].dt.hour.between(10, 17).astype(str)
+    data['is_thermal'] = ((data['lillooetDegC'] - data['vancouverDegC']) > 5).astype(str)
 
     # Pre-process data (fill missing, re-index)
-    data['hour'] = data['datetime'].dt.hour
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
     data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
@@ -106,8 +105,10 @@ def load_model_and_predict(data, target, forecast_q=4):
     # Load pre-trained checkpoint and generate PyTorch dataset object
     checkpoint_model = WORKING_DIRECTORY / f'tft{target}HourlyCheckpoint.ckpt'
     checkpoint_training_dataset = WORKING_DIRECTORY / f'{target}_training_dataset_hourly.pkl'
-    # checkpoint_model = WORKING_DIRECTORY / f'speed_tft_hourly.pkl'
-    # checkpoint_training_dataset = WORKING_DIRECTORY / f'speed_training_dataset_hourly.pkl'
+    data = data.reset_index(drop=True)
+    data['time_idx'] = data.index
+    data.loc[(data.shape[0] - MAX_PREDICTION_LENGTH):, REAL_UNKNOWN_FEATURES] = 0
+    data.loc[(data.shape[0] - MAX_PREDICTION_LENGTH):, TARGET_VARIABLES] = 0
 
     # Load training dataset for parameters to pass into inference batch
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
@@ -128,7 +129,7 @@ def load_model_and_predict(data, target, forecast_q=4):
         shuffle=False,
         num_workers=4
     )
-    model = tft_with_ignore.load_from_checkpoint(checkpoint_model)
+    model = TftWithIgnore.load_from_checkpoint(checkpoint_model)
 
     # Generate raw predictions, and extract from output
     raw_predictions = model.predict(batch, mode='raw', return_index=True, return_x=True)
@@ -140,13 +141,13 @@ def load_model_and_predict(data, target, forecast_q=4):
 
     # Pull out Q1 and Q7 for direction, lull, and gust (used later in ratings)
     if any(name in target for name in ['direction', 'lull', 'gust']):
-        y_pred_Q1 = raw_predictions.output.prediction[:, :, 0].numpy().reshape(-1)
-        y_pred_Q7 = raw_predictions.output.prediction[:, :, 6].numpy().reshape(-1)
+        y_pred_q1 = raw_predictions.output.prediction[:, :, 0].numpy().reshape(-1)
+        y_pred_q7 = raw_predictions.output.prediction[:, :, 6].numpy().reshape(-1)
         result_df = pd.DataFrame({
             'datetime': datetime_pred,
             target: y_pred_mean,
-            f'{target}_Q1': y_pred_Q1,
-            f'{target}_Q7': y_pred_Q7
+            f'{target}_Q1': y_pred_q1,
+            f'{target}_Q7': y_pred_q7
         })
     else:
         result_df = pd.DataFrame({'datetime': datetime_pred, target: y_pred_mean})
@@ -195,41 +196,57 @@ def plot_measured_forecast(df_measured, df_forecast):
 
 
 def main():
-    data = prepare_data()
-    df_transmit = pd.DataFrame()
+    start_date = pd.Timestamp('June 20, 2025', tz='America/Vancouver')
 
-    for target in TARGET_VARIABLES:
-        df_forecast = load_model_and_predict(data, target, forecast_q=4)
-        if df_transmit.empty:
-            df_transmit = df_forecast
+    # Get raw data from local database
+    sql_path = Path(os.getenv('WORKING_DIRECTORY')) / 'weather_data_hourly.db'
+    conn = sqlite3.connect(sql_path)
+
+    # Get existing table column names, keep only those matching, and commit.
+    df_measured = pd.read_sql_query('SELECT * FROM weather WHERE datetime > ?', conn, params=(start_date.timestamp(), ))
+    df_measured = prepare_data(df_measured)
+    conn.close()
+
+    df_predicted = pd.DataFrame()  # Initialize empty df to compile all the predictions
+
+    # while start_date < pd.Timestamp.today(tz='America/Vancouver'):
+    count = 0
+    while count < 100:
+        end_date = start_date + pd.Timedelta(
+            f'{MAX_ENCODER_LENGTH + MAX_PREDICTION_LENGTH} hours')
+        data = df_measured[(df_measured['datetime'] >= start_date)
+                                        & (df_measured['datetime'] <= end_date)]
+
+        df_forecast = pd.DataFrame()
+        if data.shape[0] > 18:
+            for target in TARGET_VARIABLES:
+                # print(target)
+                df_forecast_target = load_model_and_predict(data, target, forecast_q=3)
+                if df_forecast.empty:
+                    df_forecast = df_forecast_target
+                else:
+                    df_forecast = df_forecast.merge(df_forecast_target, on='datetime', how='outer')
+                    pass
+                pass
+
+            else: pass
+
+        if df_predicted.empty:
+            df_predicted = df_forecast
         else:
-            df_transmit = df_transmit.merge(df_forecast, on='datetime', how='outer')
+            df_predicted = pd.concat([df_predicted, df_forecast])
 
-    df_transmit = compute_quality_metrics(df_transmit)
-    # plot_measured_forecast(data, df_transmit.reset_index())
+        start_date = start_date + pd.to_timedelta(f'8 hours')
+        count+=1
+        print(count)
+        pass
+    df_predicted = compute_quality_metrics(df_predicted)
+    plt.plot(df_measured['datetime'], df_measured['speed'])
+    plt.plot(df_predicted['datetime'], df_predicted['speed'])
+    plt.show()
 
-    # Save to file (csv, json...)
-    df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
-    df_transmit.to_json(WORKING_DIRECTORY / f'hourly_speed_predictions.json', orient='records', lines=True)
-    # html_table_hourly = df_transmit.to_html()
-    # with open('df_forecast_hourly.html', 'w') as f:
-    #     f.write(html_table_hourly)
+    print('done')
 
 if __name__ == '__main__':
-    # Start monitoring in a background thread, if desired to monitore resource load
-    # monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
-    # monitor_thread.start()
-
-    # logging.getLogger('lightning.pytorch').setLevel(logging.WARNING)  # To suppress INFO level messages
-    local_tz = pytz.timezone('America/Vancouver')
-    start_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
-    print(f'Hourly wind prediction task started at {start_time}')
-
     # Run the main function
     main()
-
-    end_time = datetime.now(local_tz).strftime('%Y-%m-%d %H:%M:%S')
-    print(f'Hourly prediction task complete at {end_time}')
-
-    # Sleep 1ms to let the logger finish the last write (uncomment if using monitor_resources)
-    # time.sleep(0.5)

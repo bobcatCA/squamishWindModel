@@ -35,7 +35,7 @@ CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky'
 REAL_KNOWN_FEATURES = ['comoxDegC', 'lillooetDegC',
                                      'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
 REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
-TARGET_VARIABLES = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
+TARGET_VARIABLES = ['speed', 'speed_score', 'direction_score']  # Multiple targets - have to make a model for each
 
 
 def monitor_resources(interval=1, log_file='daily_forecast_resource_log.txt'):

@@ -33,7 +33,7 @@ if __name__=='__main__':
     training_features_reals_unknown = [
         'comoxKPa', 'pamKPa'
                                        ]
-    training_labels = ['speed', 'speed_variability', 'direction_variability']  # Multiple targets - have to make a model for each
+    training_labels = ['speed', 'speed_score', 'direction_score']  # Multiple targets - have to make a model for each
 
     # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
     # model, it seems like all the target parameters are just averaging together.

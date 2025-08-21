@@ -18,10 +18,10 @@ def add_scores_to_df(df):
     df['lull_relative'] = df['lull'] / df['speed']  # Same thing with lull
     df['gustLull_index'] = (df['gust_relative'] - 1) + (1 - df['lull_relative'])
     df_directionscore = df[df['speed'] > 15].groupby('date')['direction'].std().reset_index(name='dir_stdev')
-    df_directionscore['direction_variability'] = df_directionscore['dir_stdev'].apply(compute_5score, min_cutoff=0.8, max_cutoff=18)
+    df_directionscore['direction_score'] = df_directionscore['dir_stdev'].apply(compute_5score, min_cutoff=0.8, max_cutoff=18)
     df_varscore = df[df['speed'] > 15].groupby('date')['gustLull_index'].mean().apply(compute_5score,
                                                                                           min_cutoff=0.15,
-                                                                                          max_cutoff=0.75).reset_index(name='speed_variability')
+                                                                                          max_cutoff=0.75).reset_index(name='speed_score')
 
     # Merge the daily 2pm sensor readings with the maxSpeed, varScore, and directionScore
     df_ratings = pd.DataFrame()
@@ -34,7 +34,7 @@ def add_scores_to_df(df):
     # df_ratings = df_ratings.merge(df, left_on='datetime', right_on='datetime', how='left')
     # df_ratings = df_ratings.merge(df[['datetime', 'speed']], on='datetime', how='left')
     # df_ratings.drop(columns=['time'], inplace=True)
-    df_ratings.fillna({'direction_variability': 0, 'speed_variability': 0}, inplace=True)
+    df_ratings.fillna({'direction_score': 0, 'speed_score': 0}, inplace=True)
     # df_ratings = df_ratings.merge(df[['datetime', 'speed']], on='datetime', how='left')
     df_ratings.drop(columns='dir_stdev', inplace=True)
     return df_ratings
