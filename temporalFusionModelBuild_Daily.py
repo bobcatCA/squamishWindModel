@@ -15,7 +15,7 @@ class tft_with_ignore(TemporalFusionTransformer):
 
 
 if __name__=='__main__':
-    data = pd.read_csv('mergedOnSpeed_daily.csv')  # Assuming you have your data in a CSV
+    data = pd.read_csv('daily_database.csv')  # Assuming you have your data in a CSV
     data.dropna(thresh=14, inplace=True)
     data['static'] = 'S'  # Put a static data column into the df (required for training)
     data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
@@ -28,12 +28,17 @@ if __name__=='__main__':
     # Build the variables that form the basis of the model architecture
     training_features_categorical = []
     training_features_reals_known = [
-        'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'whistlerDegC', 'year_fraction'
-                                     ]
+        'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'victoriaDegC',
+        'whistlerDegC', 'year_fraction'
+    ]
+
     training_features_reals_unknown = [
-        'comoxKPa', 'pamKPa'
-                                       ]
-    training_labels = ['speed', 'speed_score', 'direction_score']  # Multiple targets - have to make a model for each
+        'comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa', 'victoriaKPa'
+    ]
+
+    training_labels = [
+        'speed', 'hours_above_20', 'speed_score', 'direction_score'
+    ]  # Multiple targets - have to make a model for each
 
     # TODO: deterimine if the loop is absolutely necessary. I haven't been able to make good predictions in a single model
     # model, it seems like all the target parameters are just averaging together.

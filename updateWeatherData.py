@@ -104,34 +104,39 @@ def get_conditions_table_daily(encoder_length=8, prediction_length=5):
     df = df.merge(df_encoder, on='datetime', how='left')
 
     # Add in the Quality scores, these are daily labels to predict
-    df_ratings = add_scores_to_df(df_encoder)
-    df = df.merge(df_ratings, on='datetime', how='left')
+    df_encoder = df_encoder[df_encoder['datetime'].isin(df['datetime'])]
+    df_encoder = add_scores_to_df(df_encoder)
 
     # Get forecast data from Environment Canada and concatenate
     df_forecast = pull_forecast_daily(time_values)
-    df = pd.concat([df, df_forecast])
-    df['year_fraction'] = ((df['datetime'].dt.month - 1) * 30.416 + df['datetime'].dt.day - 1) / 365
-    print('pause')
+    df_encoder = pd.concat([df_encoder, df_forecast])
+    df_encoder['year_fraction'] = ((df_encoder['datetime'].dt.month - 1) * 30.416 +
+                                   df_encoder['datetime'].dt.day - 1) / 365
 
     # Categorize weather columns into 'Fair', 'Mostly Cloudy', 'Cloudy', and 'Other'
-    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['Clear',
-                                                                                                   'Mainly Clear',
-                                                                                                   'Sunny'
-                                                                                                   ], 'Fair')
-    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
-                                                                                                   'Partly cloudy',
-                                                                                                   'Mainly cloudy',
-                                                                                                   ], 'Mostly Cloudy')
-    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(['A mix of sun and cloud',
-                                                                                                   ], 'Mostly Cloudy')
-    df.loc[:, df.columns.str.contains('Sky')] = df.loc[:, df.columns.str.contains('Sky')].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*',
-                                                                                                  'Other', regex = True)
+    df_encoder.loc[:, df_encoder.columns.str.contains('Sky')] = (
+        df_encoder.loc[:, df_encoder.columns.str.contains('Sky')].replace(['Clear', 'Mainly Clear', 'Sunny'], 'Fair')
+    )
+
+    df_encoder.loc[:, df_encoder.columns.str.contains('Sky')] = (
+        df_encoder.loc[:, df_encoder.columns.str.contains('Sky')].replace(['A mix of sun and cloud', 'Partly cloudy',
+                                                                           'Mainly cloudy',], 'Mostly Cloudy')
+    )
+
+    df_encoder.loc[:, df_encoder.columns.str.contains('Sky')] = (
+        df_encoder.loc[:, df_encoder.columns.str.contains('Sky')].replace(['A mix of sun and cloud',], 'Mostly Cloudy')
+    )
+
+    df_encoder.loc[:, df_encoder.columns.str.contains('Sky')] = (
+        df_encoder.loc[:, df_encoder.columns.str.contains('Sky')].replace(r'^(?!Fair$|Mostly Cloudy|Cloudy$).*',
+                                                                          'Other', regex = True)
+    )
 
     # Final cleaning/re-ordering
-    df.sort_values(by='datetime', inplace=True)
-    df.dropna(inplace=True, thresh=14)  # TODO: Better way than thresh=14?
-    df.reset_index(inplace=True, drop=True)
-    return df
+    df_encoder.sort_values(by='datetime', inplace=True)
+    df_encoder.dropna(inplace=True, thresh=14)  # TODO: Better way than thresh=14?
+    df_encoder.reset_index(inplace=True, drop=True)
+    return df_encoder
 
 
 def get_conditions_table_hourly(encoder_length: object = 12, prediction_length: object = 8, specified_start: object = None) -> DataFrame:

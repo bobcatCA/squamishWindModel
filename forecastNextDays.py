@@ -31,12 +31,20 @@ MAX_ENCODER_LENGTH = 8  # Number of past observations to feed in
 MAX_PREDICTION_LENGTH = 5  # Number of future steps to predict
 
 # Model architecture features
-CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky']
-REAL_KNOWN_FEATURES = ['comoxDegC', 'lillooetDegC',
-                                     'pembertonDegC', 'vancouverDegC', 'victoriaDegC', 'whistlerDegC']
-REAL_UNKNOWN_FEATURES = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']
-TARGET_VARIABLES = ['speed', 'speed_score', 'direction_score']  # Multiple targets - have to make a model for each
+CATEGORICAL_FEATURES = []
 
+REAL_KNOWN_FEATURES = [
+        'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'victoriaDegC',
+        'whistlerDegC', 'year_fraction'
+    ]
+
+REAL_UNKNOWN_FEATURES = [
+        'comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa', 'victoriaKPa'
+    ]
+
+TARGET_VARIABLES = [
+        'speed', 'hours_above_20', 'speed_score', 'direction_score'
+    ]  # Multiple targets - have to make a model for each
 
 def monitor_resources(interval=1, log_file='daily_forecast_resource_log.txt'):
     """
@@ -69,18 +77,9 @@ def prepare_data():
     # Compile HTML-scraped weather data and pre-process
     data = get_conditions_table_daily()
 
-    ##### For testing only ######
-    # data = pd.read_csv('mergedOnSpeed_daily.csv')
-    # # data.rename(columns={'time': 'datetime'}, inplace=True)
-    # data = data.loc[55:70].reset_index(drop=True)
-    # data.dropna(thresh=14, inplace=True)
-    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, REAL_UNKNOWN_FEATURES] = np.nan
-    # data.loc[len(data) - MAX_PREDICTION_LENGTH:, TARGET_VARIABLES] = np.nan
-    # ##############################
-
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
     data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
-    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
+    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].fillna(0)
     data.reset_index(drop=True, inplace=True)
     data['static'] = 'S'  # Required static group
     data['time_idx'] = np.arange(data.shape[0])

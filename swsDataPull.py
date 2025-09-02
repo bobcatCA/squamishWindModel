@@ -100,8 +100,8 @@ def get_sws_df(dates):
     return df
 
 if __name__=='__main__':
-    start = '2025-05-01'
-    end = '2025-07-02'
+    start = '2016-05-01'
+    end = '2025-08-02'
 
     start_date = datetime.strptime(start, "%Y-%m-%d")
     end_date = datetime.strptime(end, "%Y-%m-%d")
@@ -109,4 +109,5 @@ if __name__=='__main__':
     date_list = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d")
                  for i in range((end_date - start_date).days + 1)]
     df_sws = get_sws_df(date_list)
+    df_sws.to_csv('sws_wind_database.csv')
     pass

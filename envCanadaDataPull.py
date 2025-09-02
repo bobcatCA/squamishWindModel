@@ -23,18 +23,18 @@ def get_hourly_data_api(stationID, year, month):
 if __name__=='__main__':
     # stationID = 51442
     stations = {
-        # "Vancouver" : 51442,
+        "Vancouver" : 51442,
         "Whistler": 52178,
-        # "Pemberton": 536,
-        # "Lillooet": 27388,
-        # "Victoria": 51337,
-        # "Ballenas": 138,
-        # "Pam": 6817,
-        # "Comox": 155
-        # 'Squamish': 336
+        "Pemberton": 536,
+        "Lillooet": 27388,
+        "Victoria": 51337,
+        "Ballenas": 138,
+        "Pam": 6817,
+        "Comox": 155,
+        'Squamish': 336
     }
-    start_date = datetime.strptime('Jan2024', '%b%Y')
-    end_date = datetime.strptime('Apr2025', '%b%Y')
+    start_date = datetime.strptime('Jan2016', '%b%Y')
+    end_date = datetime.strptime('Aug2025', '%b%Y')
 
     # Loop through the stations and gather data for the last 8 years
     for station, id in stations.items():

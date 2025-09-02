@@ -31,12 +31,14 @@ MAX_PREDICTION_LENGTH = 8  # Number of future steps to predict
 # CATEGORICAL_FEATURES = ['comoxSky', 'vancouverSky', 'victoriaSky', 'whistlerSky', 'is_daytime']
 CATEGORICAL_FEATURES = []
 REAL_KNOWN_FEATURES = [
-    'lillooetDegC', 'pembertonDegC', 'vancouverDegC', 'whistlerDegC',
-    'sin_hour'
-                       ]
-REAL_UNKNOWN_FEATURES = [
-    'comoxKPa', 'pamKPa'
-                         ]
+    'lillooetDegC', 'pembertonDegC','sin_hour', 'vancouverDegC', 'victoriaDegC',
+    'whistlerDegC', 'year_fraction'
+]
+
+REAL_UNKNOWN_FEATURES = training_features_reals_unknown = [
+    'comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa', 'victoriaKPa'
+]
+
 TARGET_VARIABLES = ['speed', 'gust', 'lull', 'direction']  # Each will have a separate model
 
 def monitor_resources(interval=1, log_file='hourly_forecast_resource_log.txt'):
@@ -73,22 +75,16 @@ def prepare_data():
         prediction_length=MAX_PREDICTION_LENGTH,
     )
 
-    ###### For testing only ######
-    # data = pd.read_csv('mergedOnSpeed_hourly.csv')
-    # data.rename(columns={'time': 'datetime'}, inplace=True)
-    # data = data.loc[25720:25780].reset_index(drop=True)
-    # data.loc[len(data) - 8:, REAL_UNKNOWN_FEATURES] = np.nan
-    # data.loc[len(data) - 8:, TARGET_VARIABLES] = np.nan
-    ##############################
+
 
     # Pre-process data (fill missing, re-index)
     data['hour'] = data['datetime'].dt.hour
+    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].fillna(0)
     data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].ffill()
-    data[TARGET_VARIABLES] = data[TARGET_VARIABLES].ffill()
-    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].ffill(limit=1)
-    data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
-    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].bfill(limit=1)
-    data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].bfill(limit=1)
+    data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].interpolate(method='linear')
+    # data[CATEGORICAL_FEATURES] = data[CATEGORICAL_FEATURES].bfill(limit=1)
+    # data[REAL_KNOWN_FEATURES] = data[REAL_KNOWN_FEATURES].bfill(limit=1)
+    # data[REAL_UNKNOWN_FEATURES] = data[REAL_UNKNOWN_FEATURES].bfill(limit=1)
     data.reset_index(drop=True, inplace=True)
     # data['static'] = 'S'  # Required static group identifier
     data['static'] = 'S'
@@ -96,7 +92,7 @@ def prepare_data():
     return data
 
 
-def load_model_and_predict(data, target, forecast_q=4):
+def load_model_and_predict(data, target, forecast_q=3):
     """
     :param data: Pandas dataframe, pre-processed
     :param target: Str, name of target (label) variable
@@ -155,26 +151,24 @@ def load_model_and_predict(data, target, forecast_q=4):
     return result_df
 
 
-def compute_quality_metrics(df):
+def compute_hourly_metrics(df):
     """
     :param df: Pandas dataframe with raw predictions
     :return: Pandas dataframe with quality ratings
     """
 
-    # Sailing window: Only True if the speed is above a certain value
-    df['sailingWindow'] = df['speed'] > 13
+    df['sailingWindow'] = df['speed'] > 15
 
     # Gust/Lull index: 1 to 5 rating for the relative magnitude of gusts/lulls
-    df['speed_score'] = (df['gust_Q7'] - df['gust_Q1'] + df['lull_Q7'] - df['lull_Q1'])
-    df['speed_score'] = 4 * ((df['speed_score'] - 22) / 14)
+    df['speed_score'] = (df['gust'] - df['lull']) / df['speed']
+    df['speed_score'] = (df['speed_score'] * -2.22) + 5.444
     df['speed_score'] = np.clip(round(df['speed_score']), 1, 5)
 
     # Direction index:1 to 5 rating for the relative direction variability
     df['direction_score'] = df['direction_Q7'] - df['direction_Q1']
-    df['direction_score'] = 4 * ((df['direction_score'] - 40) / 50)
+    df['direction_score'] = (df['direction_score'] / -22) + 12
     df['direction_score'] = np.clip(round(df['direction_score']), 1, 5)
 
-    # df = df.groupby('datetime').mean()
     df.loc[df['sailingWindow'] == False, ['speed_score', 'direction_score']] = 0
     return df
 
@@ -205,10 +199,11 @@ def main():
         else:
             df_transmit = df_transmit.merge(df_forecast, on='datetime', how='outer')
 
-    df_transmit = compute_quality_metrics(df_transmit)
+    df_transmit = compute_hourly_metrics(df_transmit)
     # plot_measured_forecast(data, df_transmit.reset_index())
 
     # Save to file (csv, json...)
+    df_transmit = df_transmit[['datetime', 'speed', 'speed_score', 'direction_score']]
     df_transmit.to_csv(WORKING_DIRECTORY / f'hourly_speed_predictions.csv', index=False)
     df_transmit.to_json(WORKING_DIRECTORY / f'hourly_speed_predictions.json', orient='records', lines=True)
     # html_table_hourly = df_transmit.to_html()
