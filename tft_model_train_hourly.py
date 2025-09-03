@@ -50,7 +50,7 @@ training_features_reals_known = [
 ]
 
 training_features_reals_unknown = [
-    'comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa', 'victoriaKPa'
+    'comoxKPa', 'lillooetKPa', 'pamKPa', 'temperature', 'vancouverKPa', 'victoriaKPa'
 ]
 
 # training_features_reals_unknown = ['comoxKPa', 'vancouverKPa', 'lillooetKPa', 'pamKPa', 'ballenasKPa']

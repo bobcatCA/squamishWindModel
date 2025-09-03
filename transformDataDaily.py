@@ -24,10 +24,10 @@ def add_scores_to_df(df):
     df_varscore = df[df['speed'] > 15].groupby('date')['gustLull_index'].mean().apply(compute_5score,
                                                                                           min_cutoff=0.15,
                                                                                           max_cutoff=0.75).reset_index(name='speed_score')
-    # df_sailinghours = df.groupby('date').apply(lambda g: (g['speed'] > 20).sum()).reset_index(name='sailing_hours')
     df_sailinghours = (df.assign(sailing_hours = df['speed'] > 20)
                        .groupby('date', as_index=False)
                        .agg(hours_above_20=('sailing_hours', 'sum')))
+    df_sailinghours.loc[:, 'hours_above_20'] = df_sailinghours['hours_above_20'] - 1
 
     # Merge the daily 2pm sensor readings with the maxSpeed, varScore, and directionScore
     df_ratings = pd.DataFrame()

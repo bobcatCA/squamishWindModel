@@ -21,7 +21,7 @@ if __name__=='__main__':
     data['time_idx'] = np.arange(data.shape[0])  # Add index for model - requires time = 0, 1, 2, ..... , n
 
     # Split the data into training and validation
-    max_encoder_length = 8  # Number of past observations
+    max_encoder_length = 5  # Number of past observations
     max_prediction_length = 5  # Number of future steps you want to predict
     training_cutoff = data['time_idx'].max() - max_prediction_length
 
@@ -82,8 +82,8 @@ if __name__=='__main__':
         # Define the Temporal Fusion Transformer model
         tft = tft_with_ignore.from_dataset(
             training,
-            learning_rate=1e-3,
-            hidden_size=32,  # Size of the hidden layer
+            learning_rate=8e-4,
+            hidden_size=64,  # Size of the hidden layer
             attention_head_size=4,
             dropout=0.2,
             hidden_continuous_size=4,
@@ -97,12 +97,12 @@ if __name__=='__main__':
         tft.loss = loss_func
 
         # Wrap the model in a PyTorch Lightning Trainer
-        max_epochs = 13
+        max_epochs = 8
 
         trainer = Trainer(
             accelerator='cpu',
             max_epochs=max_epochs,
-            gradient_clip_val=0.1
+            gradient_clip_val=0.2
         )
 
         # Train the model

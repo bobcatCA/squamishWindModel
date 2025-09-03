@@ -27,7 +27,7 @@ class tft_with_ignore(TemporalFusionTransformer):
 # Load environment and global variables
 load_dotenv()
 WORKING_DIRECTORY = Path(os.getenv('WORKING_DIRECTORY'))
-MAX_ENCODER_LENGTH = 8  # Number of past observations to feed in
+MAX_ENCODER_LENGTH = 5  # Number of past observations to feed in
 MAX_PREDICTION_LENGTH = 5  # Number of future steps to predict
 
 # Model architecture features
