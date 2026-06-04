@@ -1,0 +1,25 @@
+name: squamish_wind
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch
+  - cpuonly
+  - numpy
+  - pandas
+  - matplotlib
+  - requests
+  - beautifulsoup4
+  - python-dateutil
+  - python-dotenv
+  - scikit-learn
+  - selenium
+  - psutil
+  - pytz
+  - pip
+  - pip:
+      - pytorch-forecasting
+      - lightning
+      - "thefuzz[speedup]"
