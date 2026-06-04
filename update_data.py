@@ -1,3 +1,11 @@
+"""Pull the latest EC and SWS observations into the SQLite database.
+
+    python update_data.py       # update DB only (no forecast generated)
+
+The forecast scripts call update_db() automatically, so this script is only
+needed when you want to refresh the DB without generating a new forecast.
+"""
+
 import numpy as np
 import os
 import pandas as pd
@@ -6,13 +14,13 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 
+from build_dataset import add_scores_to_df
 from ec_scrape import (
     normalize_sky_series,
     pull_forecast_daily,
     pull_forecast_hourly,
     pull_past_hrs_weather,
 )
-from score_daily import add_scores_to_df
 from sws_pull import get_sws_df
 
 load_dotenv()
@@ -29,7 +37,7 @@ def _normalize_sky_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def update_sql_db_hourly(df: pd.DataFrame) -> None:
+def _insert_rows(df: pd.DataFrame) -> None:
     with sqlite3.connect(_db_path()) as conn:
         sql_columns = pd.read_sql('PRAGMA table_info(weather)', conn)['name'].tolist()
 
@@ -44,8 +52,7 @@ def update_sql_db_hourly(df: pd.DataFrame) -> None:
     rows = list(df.itertuples(index=False, name=None))
 
     sql = 'INSERT OR IGNORE INTO weather ({}) VALUES ({})'.format(
-        ', '.join(df.columns),
-        ', '.join(['?'] * len(df.columns)),
+        ', '.join(df.columns), ', '.join(['?'] * len(df.columns)),
     )
 
     with sqlite3.connect(_db_path()) as conn:
@@ -62,7 +69,7 @@ def update_sql_db_hourly(df: pd.DataFrame) -> None:
 
 
 def update_db() -> None:
-    """Pull latest EC and SWS data and insert new rows into the SQLite DB."""
+    """Pull latest EC and SWS observations and insert new rows into the SQLite DB."""
     df_recent_weather = pull_past_hrs_weather()
     past_dates = list(df_recent_weather['datetime'].dt.date.unique().astype(str))
     try:
@@ -76,29 +83,29 @@ def update_db() -> None:
         df_recent = pd.merge_asof(df_recent_weather, df_sws, on='datetime', direction='nearest')
     else:
         df_recent = df_recent_weather
-    update_sql_db_hourly(df_recent)
+    _insert_rows(df_recent)
 
 
-def get_conditions_table_daily(encoder_length: int = 8,
-                               prediction_length: int = 5) -> pd.DataFrame:
-    update_db()
+def get_conditions_table_daily(encoder_length: int = 8, prediction_length: int = 5,
+                                update: bool = True) -> pd.DataFrame:
+    if update:
+        update_db()
     today_14 = pd.Timestamp.now(tz='America/Vancouver').normalize() + pd.Timedelta(hours=14)
     start = today_14 - timedelta(days=encoder_length)
-    end = today_14 + timedelta(days=prediction_length - 1)
+    end   = today_14 + timedelta(days=prediction_length - 1)
     time_index = pd.date_range(start=start, end=end, freq='d')
 
     with sqlite3.connect(_db_path()) as conn:
         df_hist = pd.read_sql_query(
             'SELECT * FROM weather WHERE datetime > ?',
-            conn,
-            params=(start.timestamp(),),
+            conn, params=(start.timestamp(),),
         )
     df_hist['datetime'] = (
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
         .dt.tz_convert('America/Vancouver')
     )
 
-    df_scored = add_scores_to_df(df_hist)
+    df_scored   = add_scores_to_df(df_hist)
     df_forecast = pull_forecast_daily(time_index)
     df_out = pd.concat([df_scored, df_forecast], ignore_index=True)
 
@@ -110,21 +117,21 @@ def get_conditions_table_daily(encoder_length: int = 8,
     return df_out
 
 
-def get_conditions_table_hourly(encoder_length: int = 12,
-                                prediction_length: int = 8,
-                                specified_start: pd.Timestamp = None) -> pd.DataFrame:
-    update_db()
+def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int = 8,
+                                 specified_start: pd.Timestamp = None,
+                                 update: bool = True) -> pd.DataFrame:
+    if update:
+        update_db()
 
-    now = specified_start or pd.Timestamp.now(tz='America/Vancouver').ceil('h')
+    now   = specified_start or pd.Timestamp.now(tz='America/Vancouver').ceil('h')
     start = now - timedelta(hours=encoder_length)
-    end = now + timedelta(hours=prediction_length - 1)
+    end   = now + timedelta(hours=prediction_length - 1)
     time_index = pd.date_range(start=start, end=end, freq='h')
 
     with sqlite3.connect(_db_path()) as conn:
         df_hist = pd.read_sql_query(
             'SELECT * FROM weather WHERE datetime > ?',
-            conn,
-            params=(start.timestamp(),),
+            conn, params=(start.timestamp(),),
         )
     df_hist['datetime'] = (
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
@@ -140,7 +147,7 @@ def get_conditions_table_hourly(encoder_length: int = 12,
     df = df.merge(df_data, on='datetime', how='left')
     df.sort_values('datetime', inplace=True)
 
-    df['sin_hour'] = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
+    df['sin_hour']     = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
     df = _normalize_sky_cols(df)
 

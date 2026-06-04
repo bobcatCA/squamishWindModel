@@ -8,55 +8,53 @@ A wind forecasting system for Squamish, BC. It scrapes weather data from Environ
 
 ## Running the System
 
+### Core workflow
+
 ```bash
-# Train hourly models (4 targets: speed, gust, lull, direction)
-python train.py --mode hourly
+# 1. Download historical EC station CSVs + SWS wind data + initialise DB (first-time / refresh)
+python collect_data.py
+python collect_data.py --ec-only        # only EC station CSVs
+python collect_data.py --sws-only       # only SWS wind data (requires Selenium + Chrome)
+python collect_data.py --init-db        # only initialise SQLite DB
 
-# Train daily models (4 targets: speed, hours_above_20, speed_score, direction_score)
-python train.py --mode daily
+# 2. Build training datasets from downloaded raw data
+python build_dataset.py                 # builds both hourly_database.csv and daily_database.csv
+python build_dataset.py --mode hourly
+python build_dataset.py --mode daily
 
+# 3. Train models
+python train.py --mode hourly           # 4 targets: speed, gust, lull, direction
+python train.py --mode daily            # 4 targets: speed, hours_above_20, speed_score, direction_score
 # Optional overrides: --epochs N --dropout F --hidden-size N --lr F --targets speed gust --no-lr-find
 # Named experiment variants (saves to separate checkpoints, leaves production checkpoints intact):
 #   --checkpoint-prefix tftExp    e.g. tftExpspeedHourlyCheckpoint.ckpt
 #   --weight-boost 3.0            up-weight 10AM–6PM prediction timesteps by 3× during training
 
-# Update the SQLite DB with the latest EC + SWS observations (no forecast generated)
-python updateWeatherData.py
+# 4. Update the SQLite DB with the latest EC + SWS observations (no forecast generated)
+python update_data.py
 
-# Run hourly forecast (updates DB then generates CSV + JSON output)
-python forecast_hourly.py
+# 5. Run forecasts (updates DB then generates CSV + JSON output)
+python forecast.py                      # run both hourly and daily (one DB update)
+python forecast.py --mode hourly
+python forecast.py --mode daily
+```
 
-# Run daily forecast (updates DB then generates CSV + JSON output)
-python forecast_daily.py
+### Utility scripts
 
-# Evaluate hourly model against historical data (from June 20, 2025)
-python evaluate_hourly.py
+```bash
+# Evaluate model accuracy against historical DB data
+python evaluate.py --start 2025-06-20
 
-# Compare two named model variants on the 2023 holdout across all targets
-python compare_models.py          # expects tftBase* and tftWeighted* checkpoints
+# Compare two named model variants on the 2023 holdout across all 4 targets
+python evaluate.py --compare            # expects tftBase* and tftWeighted* checkpoints
+python evaluate.py --compare --windows 100
 
-# Rebuild training CSVs from EC station CSVs + SWS wind data
-python build_dataset.py           # → hourly_database.csv
-python score_daily.py             # → daily_database.csv  (reads hourly_database.csv)
-
-# Feature selection experiments
-python feature_selection.py --epochs N        # hourly
-python feature_selection_daily.py --epochs N  # daily
-
-# Data collection
-python ec_history.py              # Download historical EC station CSVs (Jan 2016 → present)
-python sws_pull.py                # Download historical SWS wind data (requires Selenium/Chrome)
-# Live data (called automatically by forecast scripts via updateWeatherData.py):
-#   ec_scrape.py — pull_past_hrs_weather(), pull_forecast_hourly(), pull_forecast_daily()
-#   sws_pull.py  — get_sws_df()
-
-# Database
-python db_init.py                 # Initialise SQLite schema (run once)
+# Feature selection sweep
+python feature_selection.py --mode hourly --epochs 2
+python feature_selection.py --mode daily  --epochs 3
 ```
 
 ## Configuration
-
-A `.env` file must define `WORKING_DIRECTORY` — this is where the SQLite database (`weather_data_hourly.db`), trained checkpoints (`.ckpt` files), training dataset metadata (`.pkl` files), and output forecasts are stored.
 
 All model hyperparameters and feature lists live in `train_config.yaml` — it is the single source of truth. The Python dataclass defaults in `config.py` are fallbacks only; always edit the YAML. The `data.mask_intervals` section excludes known-bad sensor periods at training time without altering the CSV.
 
@@ -70,18 +68,18 @@ Dataset metadata naming: `{target}_training_dataset_{hourly|daily}.pkl` (prefixe
 
 ```
 Environment Canada + Squamish Windsports
-    ↓ (ec_scrape.py, sws_pull.py — live; ec_history.py — bulk historical)
-SQLite DB (weather_data_hourly.db)
-    ↓ (build_dataset.py)         ← also reads EC station CSVs directly
+    ↓ (collect_data.py — historical; ec_scrape.py + sws_pull.py — live)
+Per-station CSVs + sws_wind_database.csv + SQLite DB (weather_data_hourly.db)
+    ↓ (build_dataset.py)
 hourly_database.csv  daily_database.csv
     ↓ (train.py --mode hourly|daily)
 TFT checkpoints (.ckpt) + dataset metadata (.pkl)
-    ↓ (forecast_hourly.py / forecast_daily.py)
+    ↓ (forecast.py)
 hourly_speed_predictions.{csv,json}
 daily_speed_predictions.{csv,json}
 ```
 
-Training reads CSV snapshots. Inference reads live data from the SQLite DB + fresh EC forecast scrapes via `updateWeatherData.py`.
+Training reads CSV snapshots. Inference reads live data from the SQLite DB + fresh EC forecast scrapes via `update_data.py`.
 
 ## Architecture
 
@@ -94,7 +92,7 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 | Targets | speed, gust, lull, direction | speed, hours_above_20, speed_score, direction_score |
 | Data source | `hourly_database.csv` | `daily_database.csv` |
 
-**Feature selection finding:** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) consistently outperform configs that add EC temperature forecasts at all epoch counts tested. EC temps are commented out of `train_config.yaml`; uncomment and re-run `feature_selection.py` to revisit.
+**Feature selection finding:** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) consistently outperform configs that add EC temperature forecasts at all epoch counts tested. EC temps are commented out of `train_config.yaml`; uncomment and re-run `feature_selection.py --mode hourly` to revisit.
 
 **Known real features** (available in the forecast window): `sin_hour`, `year_fraction`.
 **Unknown real features** (encoder past only): `comoxKPa`, `lillooetKPa`, `pamKPa`, `vancouverKPa`, `victoriaKPa`.
@@ -108,12 +106,9 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 **Key modules:**
 - `config.py` — `HourlyConfig` / `DailyConfig` dataclasses; populated from `train_config.yaml` via `from_yaml()`
 - `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist before constructing the dataset
-- `updateWeatherData.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone (`python updateWeatherData.py`) for a DB-only update with no forecast
-- `score_daily.py` — computes daily target labels (`add_scores_to_df()`); also runnable standalone to rebuild `daily_database.csv`
-- `compare_models.py` — evaluates two named model variants (default: `tftBase*` vs `tftWeighted*`) against the 2023 holdout across all targets; prints per-target MAE tables
-- `db_init.py` — SQLite schema (run once to initialise)
-- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_hourly()`, `pull_forecast_daily()`; also exports `normalize_sky_series()` used by both `build_dataset.py` and `updateWeatherData.py`
-- `ec_history.py` — bulk historical download from EC climate API → per-station CSVs
+- `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone for a DB-only update
+- `build_dataset.py` — builds training CSVs; also exports `add_scores_to_df()` used by `update_data.py` for daily inference
+- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_hourly()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`
 - `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)`
 
 ## Key Dependencies
