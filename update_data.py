@@ -18,7 +18,6 @@ from build_dataset import add_scores_to_df
 from ec_scrape import (
     normalize_sky_series,
     pull_forecast_daily,
-    pull_forecast_hourly,
     pull_past_hrs_weather,
 )
 from sws_pull import get_sws_df
@@ -112,7 +111,7 @@ def get_conditions_table_daily(encoder_length: int = 8, prediction_length: int =
     df_out['year_fraction'] = (df_out['datetime'].dt.month * 30.416 + df_out['datetime'].dt.day) / 365
     df_out = _normalize_sky_cols(df_out)
     df_out.sort_values('datetime', inplace=True)
-    df_out.dropna(thresh=14, inplace=True)
+    df_out.dropna(thresh=5, inplace=True)
     df_out.reset_index(drop=True, inplace=True)
     return df_out
 
@@ -138,22 +137,16 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
         .dt.tz_convert('America/Vancouver')
     )
 
-    df_forecast = pull_forecast_hourly()
-    df_data = pd.concat([df_forecast, df_hist], ignore_index=True, sort=False)
-    df_data.sort_values('datetime', inplace=True)
-    df_data.reset_index(drop=True, inplace=True)
+    df_hist.sort_values('datetime', inplace=True)
 
     df = pd.DataFrame({'datetime': time_index})
-    df = df.merge(df_data, on='datetime', how='left')
-    df.sort_values('datetime', inplace=True)
+    df = df.merge(df_hist, on='datetime', how='left')
 
-    df['sin_hour']     = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
+    df['sin_hour']      = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-    df = _normalize_sky_cols(df)
 
     num_cols = df.select_dtypes(include='number').columns
     df[num_cols] = df[num_cols].interpolate(limit=1)
-    df.dropna(thresh=14, inplace=True)
     df.sort_values('datetime', inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df

@@ -30,6 +30,22 @@ _hcfg = HourlyConfig.from_yaml()
 _dcfg = DailyConfig.from_yaml()
 
 
+def _warn_missing(data: pd.DataFrame, features: list, label: str) -> None:
+    """Print a warning for any feature columns that contain NaN values."""
+    for col in features:
+        n_na = data[col].isna().sum()
+        if n_na == 0:
+            continue
+        total = len(data)
+        groups = data[col].isna().ne(data[col].isna().shift()).cumsum()
+        max_gap = int(data[col].isna().groupby(groups).sum().max())
+        if n_na == total:
+            print(f'Warning [{label}] {col}: ALL {total} values missing — check scraper or DB')
+        else:
+            print(f'Warning [{label}] {col}: {n_na}/{total} NaN values will be filled '
+                  f'(max consecutive gap: {max_gap})')
+
+
 # ── Hourly forecast ───────────────────────────────────────────────────────────
 
 def _prepare_hourly(update: bool = True) -> pd.DataFrame:
@@ -40,7 +56,8 @@ def _prepare_hourly(update: bool = True) -> pd.DataFrame:
     )
     data['hour'] = data['datetime'].dt.hour
     data[_hcfg.targets] = data[_hcfg.targets].fillna(0)
-    data[_hcfg.real_unknown] = data[_hcfg.real_unknown].interpolate(method='linear', limit=2).ffill()
+    _warn_missing(data, _hcfg.real_unknown, 'hourly')
+    data[_hcfg.real_unknown] = data[_hcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
     data[_hcfg.real_known]   = data[_hcfg.real_known].interpolate(method='linear')
     data.reset_index(drop=True, inplace=True)
     data['static']   = 'S'
@@ -106,7 +123,9 @@ def _prepare_daily(update: bool = True) -> pd.DataFrame:
         prediction_length=_dcfg.prediction_length,
         update=update,
     )
-    data[_dcfg.real_unknown] = data[_dcfg.real_unknown].interpolate(method='linear', limit=2).ffill()
+    _warn_missing(data, _dcfg.real_unknown, 'daily')
+    data[_dcfg.real_unknown] = data[_dcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
+    _warn_missing(data, _dcfg.real_known, 'daily')
     data[_dcfg.real_known]   = data[_dcfg.real_known].interpolate(method='linear', limit=2).ffill(limit=1)
     data[_dcfg.targets]      = data[_dcfg.targets].fillna(0)
     data.reset_index(drop=True, inplace=True)

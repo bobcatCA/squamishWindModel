@@ -106,9 +106,10 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 **Key modules:**
 - `config.py` — `HourlyConfig` / `DailyConfig` dataclasses; populated from `train_config.yaml` via `from_yaml()`
 - `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist before constructing the dataset
-- `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone for a DB-only update
+- `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone for a DB-only update. Hourly path merges only DB history (no forecast scrape); daily path also merges `pull_forecast_daily()` for DegC real_known features.
+- `forecast.py` — `_warn_missing()` fires before each fill step and prints NaN counts + max consecutive gap per feature; "ALL values missing" indicates a scraper or DB failure.
 - `build_dataset.py` — builds training CSVs; also exports `add_scores_to_df()` used by `update_data.py` for daily inference
-- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_hourly()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`
+- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`. (`pull_forecast_hourly()` exists but is no longer called — hourly model uses only pressure kPa from the DB encoder window, not forecast DegC/Sky.)
 - `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)`
 
 ## Key Dependencies
