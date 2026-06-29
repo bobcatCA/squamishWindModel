@@ -56,9 +56,11 @@ def _prepare_hourly(update: bool = True) -> pd.DataFrame:
     )
     data['hour'] = data['datetime'].dt.hour
     data[_hcfg.targets] = data[_hcfg.targets].fillna(0).astype(float)
-    _warn_missing(data, _hcfg.real_unknown, 'hourly')
-    data[_hcfg.real_unknown] = data[_hcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
-    data[_hcfg.real_known]   = data[_hcfg.real_known].interpolate(method='linear')
+    if _hcfg.real_unknown:
+        _warn_missing(data, _hcfg.real_unknown, 'hourly')
+        data[_hcfg.real_unknown] = data[_hcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
+    if _hcfg.real_known:
+        data[_hcfg.real_known]   = data[_hcfg.real_known].interpolate(method='linear')
     data.reset_index(drop=True, inplace=True)
     data['static']   = 'S'
     data['time_idx'] = np.arange(data.shape[0])
@@ -123,10 +125,12 @@ def _prepare_daily(update: bool = True) -> pd.DataFrame:
         prediction_length=_dcfg.prediction_length,
         update=update,
     )
-    _warn_missing(data, _dcfg.real_unknown, 'daily')
-    data[_dcfg.real_unknown] = data[_dcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
-    _warn_missing(data, _dcfg.real_known, 'daily')
-    data[_dcfg.real_known]   = data[_dcfg.real_known].interpolate(method='linear', limit=2).ffill(limit=1)
+    if _dcfg.real_unknown:
+        _warn_missing(data, _dcfg.real_unknown, 'daily')
+        data[_dcfg.real_unknown] = data[_dcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
+    if _dcfg.real_known:
+        _warn_missing(data, _dcfg.real_known, 'daily')
+        data[_dcfg.real_known]   = data[_dcfg.real_known].interpolate(method='linear', limit=2).ffill(limit=1)
     data[_dcfg.targets]      = data[_dcfg.targets].fillna(0).astype(float)
     data.reset_index(drop=True, inplace=True)
     data['static']   = 'S'

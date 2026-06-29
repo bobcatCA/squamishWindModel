@@ -49,6 +49,12 @@ python evaluate.py --start 2025-06-20
 python evaluate.py --compare            # expects tftBase* and tftWeighted* checkpoints
 python evaluate.py --compare --windows 100
 
+# Plot predicted vs actual at multiple forecast horizons (1h/4h hourly; 1d daily)
+python horizon_eval.py                        # hourly, all targets, stride=4h
+python horizon_eval.py --mode daily           # daily, all targets, stride=1d
+python horizon_eval.py --target speed         # single target
+python horizon_eval.py --start 2025-06-01 --save
+
 # Feature selection sweep
 python feature_selection.py --mode hourly --epochs 2
 python feature_selection.py --mode daily  --epochs 3
@@ -58,7 +64,9 @@ python feature_selection.py --mode daily  --epochs 3
 
 All model hyperparameters and feature lists live in `train_config.yaml` — it is the single source of truth. The Python dataclass defaults in `config.py` are fallbacks only; always edit the YAML. The `data.mask_intervals` section excludes known-bad sensor periods at training time without altering the CSV.
 
-Notable YAML keys beyond features and sequence lengths: `sample_weight_boost` / `weight_target_start_hour` / `weight_target_end_hour` control time-of-day loss weighting during training; `val_full_data` / `val_predict_mode` control validation dataset construction (differ between hourly and daily).
+Notable YAML keys beyond features and sequence lengths: `sample_weight_boost` / `weight_target_start_hour` / `weight_target_end_hour` control time-of-day loss weighting during training; `calm_weight_threshold` / `calm_weight_value` down-weight or exclude calm-period timesteps from the loss (set threshold to 0.0 to disable); `val_full_data` / `val_predict_mode` control validation dataset construction (differ between hourly and daily).
+
+CLI overrides: `--calm-weight F` overrides `calm_weight_value` at runtime.
 
 Default checkpoint naming: `tft{target}{Hourly|Daily}Checkpoint.ckpt` (e.g., `tftspeedHourlyCheckpoint.ckpt`)
 Named-variant naming (via `--checkpoint-prefix`): `{prefix}{target}{Hourly|Daily}Checkpoint.ckpt`
@@ -92,10 +100,12 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 | Targets | speed, gust, lull, direction | speed, hours_above_20, speed_score, direction_score |
 | Data source | `hourly_database.csv` | `daily_database.csv` |
 
-**Feature selection finding:** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) consistently outperform configs that add EC temperature forecasts at all epoch counts tested. EC temps are commented out of `train_config.yaml`; uncomment and re-run `feature_selection.py --mode hourly` to revisit.
+**Feature selection finding (earlier):** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) outperformed configs adding EC temperature forecasts at the epoch counts tested. Currently under re-evaluation — the active `train_config.yaml` uses EC temperatures (DegC) as `real_unknown` for hourly, not pressures. Re-run `feature_selection.py --mode hourly` to compare.
 
-**Known real features** (available in the forecast window): `sin_hour`, `year_fraction`.
-**Unknown real features** (encoder past only): `comoxKPa`, `lillooetKPa`, `pamKPa`, `vancouverKPa`, `victoriaKPa`.
+**`wind_hour`** — asymmetric cosine temporal feature: 0 outside 10am–6pm, rises to 1.0 at 1pm, falls back to 0 at 6pm. Computed in `build_dataset.py`, `update_data.py`, `evaluate.py`, and `horizon_eval.py`. Toggle via `real_known` in the YAML.
+
+**Known real features** (available in the forecast window): `wind_hour`, `sin_hour`, `year_fraction` (see YAML for which are active).
+**Unknown real features** (encoder past only): pressure kPa and/or station DegC columns — see `real_unknown` in `train_config.yaml` for current active set.
 
 **Quality scores:**
 - `speed_score` (1–5): steadiness; derived from gust/lull spread
@@ -105,11 +115,12 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 
 **Key modules:**
 - `config.py` — `HourlyConfig` / `DailyConfig` dataclasses; populated from `train_config.yaml` via `from_yaml()`
-- `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist before constructing the dataset
+- `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist and omits empty feature lists (YAML parses `[]` as `None`); calm-period and time-of-day loss weighting applied here
 - `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone for a DB-only update. Hourly path merges only DB history (no forecast scrape); daily path also merges `pull_forecast_daily()` for DegC real_known features.
 - `forecast.py` — `_warn_missing()` fires before each fill step and prints NaN counts + max consecutive gap per feature; "ALL values missing" indicates a scraper or DB failure.
 - `build_dataset.py` — builds training CSVs; also exports `add_scores_to_df()` used by `update_data.py` for daily inference
-- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`. (`pull_forecast_hourly()` exists but is no longer called — hourly model uses only pressure kPa from the DB encoder window, not forecast DegC/Sky.)
+- `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`. (`pull_forecast_hourly()` exists but is no longer called — hourly inference uses only DB encoder window data, not forecast DegC/Sky.)
+- `horizon_eval.py` — plots predicted vs actual at multiple horizons from the live DB; supports `--mode hourly` (1h/4h) and `--mode daily` (1d with Q25–Q75 band)
 - `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)`
 
 ## Key Dependencies
