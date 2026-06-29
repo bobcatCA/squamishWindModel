@@ -113,7 +113,7 @@ def run_hourly(update: bool = True) -> None:
     df_out = _compute_hourly_quality(df_out)
     df_out = df_out[['datetime', 'speed', 'speed_score', 'direction_score']]
     df_out.to_csv(WORKING_DIR / 'hourly_speed_predictions.csv', index=False)
-    df_out.to_json(WORKING_DIR / 'hourly_speed_predictions.json', orient='records', lines=True)
+    df_out.to_json(WORKING_DIR / 'hourly_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Hourly forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
 
 
@@ -130,7 +130,7 @@ def _prepare_daily(update: bool = True) -> pd.DataFrame:
         data[_dcfg.real_unknown] = data[_dcfg.real_unknown].interpolate(method='linear', limit=2).ffill().bfill()
     if _dcfg.real_known:
         _warn_missing(data, _dcfg.real_known, 'daily')
-        data[_dcfg.real_known]   = data[_dcfg.real_known].interpolate(method='linear', limit=2).ffill(limit=1)
+        data[_dcfg.real_known]   = data[_dcfg.real_known].interpolate(method='linear', limit=2).ffill().bfill()
     data[_dcfg.targets]      = data[_dcfg.targets].fillna(0).astype(float)
     data.reset_index(drop=True, inplace=True)
     data['static']   = 'S'
@@ -167,7 +167,7 @@ def run_daily(update: bool = True) -> None:
         df_t = _predict_daily_target(data, target)
         df_out = df_t if df_out.empty else df_out.merge(df_t, on='datetime', how='outer')
     df_out.to_csv(WORKING_DIR / 'daily_speed_predictions.csv', index=False)
-    df_out.to_json(WORKING_DIR / 'daily_speed_predictions.json', orient='records', lines=True)
+    df_out.to_json(WORKING_DIR / 'daily_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Daily forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
 
 
