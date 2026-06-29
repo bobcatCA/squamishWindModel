@@ -144,6 +144,11 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
 
     df['sin_hour']      = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
+    _h = df['datetime'].dt.hour
+    df['wind_hour']     = np.where(
+        (_h >= 10) & (_h <= 13), 0.5 * (1 - np.cos(np.pi * (_h - 10) / 3)),
+        np.where((_h > 13) & (_h < 18), 0.5 * (1 + np.cos(np.pi * (_h - 13) / 5)), 0.0)
+    )
 
     num_cols = df.select_dtypes(include='number').columns
     df[num_cols] = df[num_cols].interpolate(limit=1)

@@ -26,7 +26,7 @@ class tft_with_ignore(TemporalFusionTransformer):
 
 def _build_dataset(data: pd.DataFrame, target: str, config,
                    cutoff: int) -> TimeSeriesDataSet:
-    required = set(config.real_known + config.real_unknown + config.categorical + [target])
+    required = set((config.real_known or []) + (config.real_unknown or []) + (config.categorical or []) + [target])
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError(f'Feature columns missing from data: {missing}')
@@ -36,9 +36,7 @@ def _build_dataset(data: pd.DataFrame, target: str, config,
         target=target,
         group_ids=['static'],
         static_categoricals=['static'],
-        time_varying_known_categoricals=config.categorical,
-        time_varying_known_reals=config.real_known,
-        time_varying_unknown_reals=[target] + config.real_unknown,
+        time_varying_unknown_reals=[target] + (config.real_unknown or []),
         min_encoder_length=config.min_encoder_length,
         max_encoder_length=config.encoder_length,
         min_prediction_length=config.min_prediction_length,
@@ -48,6 +46,10 @@ def _build_dataset(data: pd.DataFrame, target: str, config,
         add_target_scales=True,
         randomize_length=None,
     )
+    if config.categorical:
+        kwargs['time_varying_known_categoricals'] = config.categorical or []
+    if config.real_known:
+        kwargs['time_varying_known_reals'] = config.real_known or []
     if config.allow_missing_timesteps:
         kwargs['allow_missing_timesteps'] = True
     if 'weight' in data.columns:
@@ -88,14 +90,24 @@ def train_model(config) -> None:
     data['time_idx'] = np.arange(len(data))
     data = data.reset_index(drop=True)
 
-    if config.sample_weight_boost > 1.0:
-        hour = data['datetime'].dt.hour
-        in_window = (hour >= config.weight_target_start_hour) & (hour < config.weight_target_end_hour)
-        data['weight'] = np.where(in_window, float(config.sample_weight_boost), 1.0)
-        n_boosted = int(in_window.sum())
-        print(f'  Sample weighting: {config.sample_weight_boost}× for hours '
-              f'{config.weight_target_start_hour}–{config.weight_target_end_hour} '
-              f'({n_boosted:,} of {len(data):,} rows)')
+    use_weighting = (config.sample_weight_boost > 1.0 or config.calm_weight_threshold > 0.0)
+    if use_weighting:
+        data['weight'] = 1.0
+
+        if config.sample_weight_boost > 1.0:
+            hour = data['datetime'].dt.hour
+            in_window = (hour >= config.weight_target_start_hour) & (hour < config.weight_target_end_hour)
+            data.loc[in_window, 'weight'] *= float(config.sample_weight_boost)
+            print(f'  Time-of-day weighting: {config.sample_weight_boost}× for hours '
+                  f'{config.weight_target_start_hour}–{config.weight_target_end_hour} '
+                  f'({int(in_window.sum()):,} of {len(data):,} rows)')
+
+        if config.calm_weight_threshold > 0.0:
+            calm = data['speed'] < config.calm_weight_threshold
+            data.loc[calm, 'weight'] *= config.calm_weight_value
+            action = 'ignored' if config.calm_weight_value == 0.0 else f'weighted ×{config.calm_weight_value}'
+            print(f'  Calm weighting: speed < {config.calm_weight_threshold} kts {action} '
+                  f'({int(calm.sum()):,} of {len(data):,} rows)')
 
     cutoff = config.training_cutoff(data['time_idx'].max())
     loss_fn = QuantileLoss()

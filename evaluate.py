@@ -100,9 +100,16 @@ def _load_db_data(start: pd.Timestamp) -> pd.DataFrame:
         .dt.tz_convert('America/Vancouver')
     )
     df['sin_hour']     = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
+    _h = df['datetime'].dt.hour
+    df['wind_hour']    = np.where(
+        (_h >= 10) & (_h <= 13), 0.5 * (1 - np.cos(np.pi * (_h - 10) / 3)),
+        np.where((_h > 13) & (_h < 18), 0.5 * (1 + np.cos(np.pi * (_h - 13) / 5)), 0.0)
+    )
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-    df[REAL_UNKNOWN] = df[REAL_UNKNOWN].ffill().bfill()
-    df[REAL_KNOWN]   = df[REAL_KNOWN].ffill().bfill()
+    if REAL_UNKNOWN:
+        df[REAL_UNKNOWN] = df[REAL_UNKNOWN].ffill().bfill()
+    if REAL_KNOWN:
+        df[REAL_KNOWN]   = df[REAL_KNOWN].ffill().bfill()
     df[TARGETS]      = df[TARGETS].fillna(0)
     df.reset_index(drop=True, inplace=True)
     df['static']   = 'S'

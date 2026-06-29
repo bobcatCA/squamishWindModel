@@ -62,8 +62,9 @@ hourly:
 
   # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
-    - sin_hour
-    - year_fraction
+    # - wind_hour       # asymmetric cosine: 0 outside 10am-6pm, peak 1.0 at 1pm
+    # - sin_hour
+    # - year_fraction
     # Temperatures: feature selection (rounds 1–3) showed adding EC temps consistently
     # hurts at production epoch counts — pressures alone generalise better.
     # - lillooetDegC
@@ -75,11 +76,19 @@ hourly:
 
   # Features only available in the past (measured, not forecast)
   real_unknown:
+    #- comoxDegC
     - comoxKPa
-    - lillooetKPa
+    - lillooetDegC
+    #- lillooetKPa
+    - pamDegC
     - pamKPa
-    - vancouverKPa
-    - victoriaKPa
+    - pembertonDegC
+    #- pembertonKPa
+    - vancouverDegC
+    #- vancouverKPa
+    - whistlerDegC    
+    #- whistlerKPa
+    
     # - ballenasKPa     # 8.6% NaN — usable but not needed
     # - whistlerKPa     # 33.6% NaN — too sparse
     # - pembertonKPa    # 19.6% NaN — too sparse
@@ -119,6 +128,12 @@ hourly:
   weight_target_start_hour: 10
   weight_target_end_hour: 18
 
+  # Calm-period weighting.  Timesteps where speed < calm_weight_threshold are
+  # multiplied by calm_weight_value in the loss.  0.0 = exclude entirely.
+  # Set calm_weight_threshold to 0.0 to disable.
+  calm_weight_threshold: 0.0
+  calm_weight_value: 1.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 daily:
   data_path: daily_database.csv
@@ -138,23 +153,23 @@ daily:
 
   # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
-    - year_fraction
+    # - year_fraction
     - lillooetDegC
     - pembertonDegC
     - vancouverDegC
-    - victoriaDegC
+    # - victoriaDegC
     - whistlerDegC
     # - comoxDegC
     # - ballenasDegC
-    # - pamDegC
+    - pamDegC
 
   # Features only available in the past
   real_unknown:
-    - comoxKPa
-    - lillooetKPa
-    - pamKPa
-    - vancouverKPa
-    - victoriaKPa
+    # - comoxKPa
+    # - lillooetKPa
+    # - pamKPa
+    # - vancouverKPa
+    # - victoriaKPa
     # - whistlerKPa
     # - pembertonKPa
     # - ballenasKPa

@@ -92,6 +92,11 @@ def build_hourly(out_path: str = 'hourly_database.csv') -> pd.DataFrame:
     df['month']        = df['datetime'].dt.month
     df['day']          = df['datetime'].dt.day
     df['sin_hour']     = np.sin(2 * np.pi * df['hour'] / 24)
+    _h = df['hour']
+    df['wind_hour']    = np.where(
+        (_h >= 10) & (_h <= 13), 0.5 * (1 - np.cos(np.pi * (_h - 10) / 3)),
+        np.where((_h > 13) & (_h < 18), 0.5 * (1 + np.cos(np.pi * (_h - 13) / 5)), 0.0)
+    )
     df['year_fraction'] = (df['month'] * 30.416 + df['day']) / 365
     df['gust_relative']  = (df['gust'] / df['speed']).replace([np.inf, -np.inf], 3).fillna(0).clip(1, 3)
     df['lull_relative']  = (df['lull'] / df['speed']).replace([np.inf, -np.inf], 0).fillna(0).clip(0, 1)

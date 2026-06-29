@@ -64,6 +64,12 @@ class _BaseConfig:
     weight_target_start_hour: int = 10
     weight_target_end_hour: int = 18
 
+    # Calm-period weighting.  Rows where speed < calm_weight_threshold are
+    # multiplied by calm_weight_value (0.0 = exclude from loss entirely).
+    # Set calm_weight_threshold to 0.0 to disable.
+    calm_weight_threshold: float = 0.0
+    calm_weight_value: float = 0.0
+
     @classmethod
     def _from_yaml(cls, section: str, yaml_path: Path = CONFIG_YAML):
         instance = cls()
