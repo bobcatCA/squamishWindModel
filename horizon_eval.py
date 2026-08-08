@@ -39,7 +39,7 @@ from tft_common import tft_with_ignore
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY'))
-DB_PATH = WORKING_DIR / 'weather_data_hourly.db'
+DB_PATH = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
 
 _hcfg = HourlyConfig.from_yaml()
 _dcfg = DailyConfig.from_yaml()
@@ -104,8 +104,8 @@ def _load_db_data_daily(start: pd.Timestamp, cfg: DailyConfig) -> pd.DataFrame:
 
 def _load_model_and_dataset(target: str, mode: str):
     suffix = 'Hourly' if mode == 'hourly' else 'Daily'
-    ckpt = WORKING_DIR / f'tft{target}{suffix}Checkpoint.ckpt'
-    pkl  = WORKING_DIR / f'{target}_training_dataset_{mode}.pkl'
+    ckpt = WORKING_DIR / 'models' / f'tft{target}{suffix}Checkpoint.ckpt'
+    pkl  = WORKING_DIR / 'models' / f'{target}_training_dataset_{mode}.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
         training_dataset = torch.load(pkl, weights_only=False)
     model = tft_with_ignore.load_from_checkpoint(ckpt)
@@ -246,7 +246,7 @@ def run(start: pd.Timestamp, stride: int, save: bool,
             sel.annotation.get_bbox_patch().set(alpha=0.85)
 
     if save:
-        out = WORKING_DIR / f'horizon_eval_{mode}.png'
+        out = WORKING_DIR / 'forecasts' / f'horizon_eval_{mode}.png'
         fig.savefig(out, dpi=150, bbox_inches='tight')
         print(f'\nSaved {out}')
 

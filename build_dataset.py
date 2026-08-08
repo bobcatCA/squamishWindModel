@@ -3,6 +3,12 @@
     python build_dataset.py             # build both hourly and daily CSVs
     python build_dataset.py --mode hourly
     python build_dataset.py --mode daily  (reads hourly_database.csv)
+
+Column naming convention
+    squamishSpeed / squamishGust / squamishLull / squamishDirection / squamishDegC
+        — measurements from the SWS sensor at the Squamish spit
+    {station}DegC / {station}KPa / {station}Hum / {station}Sky
+        — measurements from the corresponding EC weather station
 """
 
 import argparse
@@ -18,92 +24,98 @@ HUM_COL   = 'Rel Hum (%)'
 SKY_COL   = 'Weather'
 TZ        = 'America/Vancouver'
 
+# (csv filename, has sky-condition column)
 STATIONS = {
-    'vancouver': ('Vancouver.csv', True),
-    'whistler':  ('Whistler.csv',  True),
-    'comox':     ('Comox.csv',     True),
-    'victoria':  ('Victoria.csv',  True),
-    'pemberton': ('Pemberton.csv', False),
-    'lillooet':  ('Lillooet.csv',  False),
-    'pam':       ('Pam.csv',       False),
-    'ballenas':  ('Ballenas.csv',  False),
+    'vancouver': ('web_data/Vancouver.csv', True),
+    'whistler':  ('web_data/Whistler.csv',  True),
+    'comox':     ('web_data/Comox.csv',     True),
+    'victoria':  ('web_data/Victoria.csv',  True),
+    'pemberton': ('web_data/Pemberton.csv', False),
+    'lillooet':  ('web_data/Lillooet.csv',  False),
+    'pam':       ('web_data/Pam.csv',       False),
+    'ballenas':  ('web_data/Ballenas.csv',  False),
 }
 
 
-# ── Hourly dataset ────────────────────────────────────────────────────────────
+# ── Loaders ───────────────────────────────────────────────────────────────────
 
-def _load_station(filename: str, has_sky: bool) -> pd.DataFrame:
+def _load_station(filename: str, has_sky: bool, name: str) -> pd.DataFrame:
+    """Load one EC station CSV → tz-aware DatetimeIndex, prefixed column names."""
     cols = [TIME_COL, TEMP_COL, PRESS_COL, HUM_COL] + ([SKY_COL] if has_sky else [])
     df = pd.read_csv(filename, usecols=cols)
     df[HUM_COL] = pd.to_numeric(df[HUM_COL], errors='coerce')
-    return df.set_index(TIME_COL)
+
+    idx = pd.to_datetime(df[TIME_COL]).dt.tz_localize(
+        TZ, nonexistent='shift_forward', ambiguous='NaT'
+    )
+    df = df.drop(columns=[TIME_COL])
+    df.index = idx
+    df.index.name = 'datetime'
+    df = df[~df.index.isna() & ~df.index.duplicated(keep='first')]
+
+    rename = {TEMP_COL: f'{name}DegC', PRESS_COL: f'{name}KPa', HUM_COL: f'{name}Hum'}
+    if has_sky:
+        rename[SKY_COL] = f'{name}Sky'
+    return df.rename(columns=rename)
 
 
 def _load_wind(filename: str) -> pd.DataFrame:
-    df = pd.read_csv(filename, index_col=0)
+    """Load SWS CSV → resample to hourly → squamish-prefixed column names."""
+    df = pd.read_csv(filename)
     df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert(TZ)
     df = df.sort_values('datetime').drop_duplicates(subset='datetime').set_index('datetime')
+
+    # Sensor sometimes reports temperature in tenths of a degree (e.g. 150 → 15.0°C).
+    # Divide by 10 until all values are within a plausible outdoor range (±50°C).
+    if 'temperature' in df.columns:
+        df['temperature'] = df['temperature'].astype(float)
+        while (df['temperature'].abs() > 50).any():
+            df.loc[df['temperature'].abs() > 50, 'temperature'] /= 10
+
+    # Average direction via unit-vector decomposition to avoid wrap-around artefacts
     df['dir_sin'] = np.sin(np.radians(df['direction']))
     df['dir_cos'] = np.cos(np.radians(df['direction']))
     scalar_cols = [c for c in ('speed', 'gust', 'lull', 'temperature') if c in df.columns]
     hourly = df[scalar_cols + ['dir_sin', 'dir_cos']].resample('h').mean()
     hourly['direction'] = np.degrees(np.arctan2(hourly['dir_sin'], hourly['dir_cos'])) % 360
-    return hourly[scalar_cols + ['direction']].dropna(how='all')
+    hourly = hourly[scalar_cols + ['direction']].dropna(how='all')
+
+    return hourly.rename(columns={
+        'speed':       'squamishSpeed',
+        'gust':        'squamishGust',
+        'lull':        'squamishLull',
+        'direction':   'squamishDirection',
+        'temperature': 'squamishDegC',
+    })
 
 
-def build_hourly(out_path: str = 'hourly_database.csv') -> pd.DataFrame:
-    stations = {name: _load_station(f, has_sky) for name, (f, has_sky) in STATIONS.items()}
+# ── Hourly dataset ────────────────────────────────────────────────────────────
 
-    base = stations['vancouver']
-    df = base[[TEMP_COL, PRESS_COL, HUM_COL, SKY_COL]].rename(columns={
-        TEMP_COL: 'vancouverDegC', PRESS_COL: 'vancouverKPa',
-        HUM_COL: 'vancouverHum',  SKY_COL: 'vancouverSky',
-    }).reset_index().rename(columns={TIME_COL: 'datetime'})
+def build_hourly(out_path: str = 'training_data/hourly_database.csv') -> pd.DataFrame:
+    df_wind = _load_wind('web_data/sws_wind_database.csv')
+    print(f'SWS: {len(df_wind):,} hourly rows  ({df_wind.index.min()} → {df_wind.index.max()})')
 
-    for name, (_, has_sky) in STATIONS.items():
-        if name == 'vancouver':
-            continue
-        rename = {TEMP_COL: f'{name}DegC', PRESS_COL: f'{name}KPa', HUM_COL: f'{name}Hum'}
-        if has_sky:
-            rename[SKY_COL] = f'{name}Sky'
-        df = df.merge(
-            stations[name][list(rename)].rename(columns=rename),
-            how='left', left_on='datetime', right_index=True,
-        )
+    ec = {name: _load_station(f, sky, name) for name, (f, sky) in STATIONS.items()}
+    df_ec = pd.concat(ec.values(), axis=1)
 
-    df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(
-        TZ, nonexistent='shift_forward', ambiguous='NaT',
-    )
-    df = df.set_index('datetime')
-    df = df[~df.index.isna() & ~df.index.duplicated(keep='first')]
+    df = df_wind.join(df_ec, how='left').reset_index()
 
-    df_wind = _load_wind('sws_wind_database.csv')
-    print(f'SWS hourly rows: {len(df_wind):,}  ({df_wind.index.min()} → {df_wind.index.max()})')
+    # Fill zero for missing SWS readings (calm / sensor down)
+    wind_cols = ['squamishSpeed', 'squamishGust', 'squamishLull', 'squamishDirection']
+    df[wind_cols] = df[wind_cols].fillna(0)
 
-    sky_cols = [c for c in df.columns if c.endswith('Sky')]
-    df = df_wind.join(df, how='left').reset_index()
-    df = df.rename(columns={'index': 'datetime'})
-    df[['direction', 'gust', 'lull', 'speed']] = (
-        df[['direction', 'gust', 'lull', 'speed']].fillna(0)
-    )
-
-    df['hour']         = df['datetime'].dt.hour
-    df['date']         = df['datetime'].dt.date
-    df['month']        = df['datetime'].dt.month
-    df['day']          = df['datetime'].dt.day
-    df['sin_hour']     = np.sin(2 * np.pi * df['hour'] / 24)
-    _h = df['hour']
+    # Temporal features
+    h = df['datetime'].dt.hour
+    df['sin_hour']     = np.sin(2 * np.pi * h / 24)
     df['wind_hour']    = np.where(
-        (_h >= 10) & (_h <= 13), 0.5 * (1 - np.cos(np.pi * (_h - 10) / 3)),
-        np.where((_h > 13) & (_h < 18), 0.5 * (1 + np.cos(np.pi * (_h - 13) / 5)), 0.0)
+        (h >= 10) & (h <= 13), 0.5 * (1 - np.cos(np.pi * (h - 10) / 3)),
+        np.where((h > 13) & (h < 18), 0.5 * (1 + np.cos(np.pi * (h - 13) / 5)), 0.0)
     )
-    df['year_fraction'] = (df['month'] * 30.416 + df['day']) / 365
-    df['gust_relative']  = (df['gust'] / df['speed']).replace([np.inf, -np.inf], 3).fillna(0).clip(1, 3)
-    df['lull_relative']  = (df['lull'] / df['speed']).replace([np.inf, -np.inf], 0).fillna(0).clip(0, 1)
-    df['gustLull_index'] = (df['gust_relative'] - 1) + (1 - df['lull_relative'])
+    df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
 
-    for col in sky_cols:
-        df[col] = normalize_sky_series(df[col])
+    for col in df.columns:
+        if col.endswith('Sky'):
+            df[col] = normalize_sky_series(df[col])
 
     df = df.sort_values('datetime')[sorted(df.columns)]
     df.to_csv(out_path, index=False)
@@ -129,32 +141,31 @@ def add_scores_to_df(df: pd.DataFrame) -> pd.DataFrame:
     df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('America/Vancouver')
     df['date'] = df['datetime'].dt.date
 
-    df['gust_relative']  = df['gust'] / df['speed']
-    df['lull_relative']  = df['lull'] / df['speed']
-    df['gustLull_index'] = (df['gust_relative'] - 1) + (1 - df['lull_relative'])
-
-    sailing = df[df['speed'] > 15]
+    sailing = df[df['squamishSpeed'] > 15].copy()
+    sailing['gust_relative']   = sailing['squamishGust'] / sailing['squamishSpeed']
+    sailing['lull_relative']   = sailing['squamishLull'] / sailing['squamishSpeed']
+    sailing['gust_lull_index'] = (sailing['gust_relative'] - 1) + (1 - sailing['lull_relative'])
 
     dir_stdev = (
-        sailing.groupby('date')['direction']
+        sailing.groupby('date')['squamishDirection']
         .std()
         .reset_index(name='dir_stdev')
     )
     dir_stdev['direction_score'] = _to_5_score(dir_stdev['dir_stdev'], low=0.8, high=18)
 
     speed_score = (
-        sailing.groupby('date')['gustLull_index']
+        sailing.groupby('date')['gust_lull_index']
         .mean()
         .apply(_to_5_score, low=0.15, high=0.75)
         .reset_index(name='speed_score')
     )
 
     hours_above_20 = (
-        df.assign(above_20=df['speed'] > 20)
+        df.assign(above_20=df['squamishSpeed'] > 20)
         .groupby('date', as_index=False)
         .agg(hours_above_20=('above_20', 'sum'))
     )
-    hours_above_20['hours_above_20'] -= 1  # calibration offset
+    hours_above_20['hours_above_20'] -= 1
 
     daily = pd.DataFrame({'date': df['date'].unique()})
     daily = (daily
@@ -174,8 +185,8 @@ def add_scores_to_df(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def build_daily(hourly_path: str = 'hourly_database.csv',
-                out_path: str = 'daily_database.csv') -> pd.DataFrame:
+def build_daily(hourly_path: str = 'training_data/hourly_database.csv',
+                out_path: str = 'training_data/daily_database.csv') -> pd.DataFrame:
     data = pd.read_csv(hourly_path)
     data = add_scores_to_df(data)
     data.to_csv(out_path, index=False)

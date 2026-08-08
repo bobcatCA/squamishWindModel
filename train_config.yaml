@@ -45,7 +45,7 @@ data:
 
 # ─────────────────────────────────────────────────────────────────────────────
 hourly:
-  data_path: hourly_database.csv
+  data_path: training_data/hourly_database.csv
 
   # Sequence lengths
   encoder_length: 12        # hours of history to feed in
@@ -55,10 +55,7 @@ hourly:
 
   # Wind variables to predict (one model trained per target)
   targets:
-    - speed
-    - gust
-    - lull
-    - direction
+    - squamishSpeed
 
   # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
@@ -77,13 +74,15 @@ hourly:
   # Features only available in the past (measured, not forecast)
   real_unknown:
     #- comoxDegC
-    - comoxKPa
+    #- comoxKPa
     - lillooetDegC
     #- lillooetKPa
     - pamDegC
-    - pamKPa
+    #- pamKPa
     - pembertonDegC
     #- pembertonKPa
+    - squamishDegC
+    - squamishDirection
     - vancouverDegC
     #- vancouverKPa
     - whistlerDegC    
@@ -136,7 +135,7 @@ hourly:
 
 # ─────────────────────────────────────────────────────────────────────────────
 daily:
-  data_path: daily_database.csv
+  data_path: training_data/daily_database.csv
 
   # Sequence lengths
   encoder_length: 5         # days of history to feed in
@@ -146,11 +145,8 @@ daily:
 
   # Daily wind quality metrics to predict
   targets:
-    - speed
-    - hours_above_20
-    - speed_score
-    - direction_score
-
+    - squamishSpeed
+    
   # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
     # - year_fraction

@@ -13,18 +13,20 @@ A wind forecasting system for Squamish, BC. It scrapes weather data from Environ
 ```bash
 # 1. Download historical EC station CSVs + SWS wind data + initialise DB (first-time / refresh)
 python collect_data.py
-python collect_data.py --ec-only        # only EC station CSVs
+python collect_data.py --ec-only        # only EC station CSVs (full rebuild → web_data/)
+python collect_data.py --ec-update      # append EC data since last CSV entry (detects/re-fetches sparse months)
 python collect_data.py --sws-only       # only SWS wind data (requires Selenium + Chrome)
+python collect_data.py --sws-update     # append SWS data since last CSV entry
 python collect_data.py --init-db        # only initialise SQLite DB
 
 # 2. Build training datasets from downloaded raw data
-python build_dataset.py                 # builds both hourly_database.csv and daily_database.csv
+python build_dataset.py                 # builds both training_data/hourly_database.csv and daily_database.csv
 python build_dataset.py --mode hourly
 python build_dataset.py --mode daily
 
 # 3. Train models
-python train.py --mode hourly           # 4 targets: speed, gust, lull, direction
-python train.py --mode daily            # 4 targets: speed, hours_above_20, speed_score, direction_score
+python train.py --mode hourly           # targets defined in train_config.yaml (e.g. squamishSpeed)
+python train.py --mode daily            # targets defined in train_config.yaml
 # Optional overrides: --epochs N --dropout F --hidden-size N --lr F --targets speed gust --no-lr-find
 # Named experiment variants (saves to separate checkpoints, leaves production checkpoints intact):
 #   --checkpoint-prefix tftExp    e.g. tftExpspeedHourlyCheckpoint.ckpt
@@ -68,37 +70,43 @@ Notable YAML keys beyond features and sequence lengths: `sample_weight_boost` / 
 
 CLI overrides: `--calm-weight F` overrides `calm_weight_value` at runtime.
 
-Default checkpoint naming: `tft{target}{Hourly|Daily}Checkpoint.ckpt` (e.g., `tftspeedHourlyCheckpoint.ckpt`)
-Named-variant naming (via `--checkpoint-prefix`): `{prefix}{target}{Hourly|Daily}Checkpoint.ckpt`
-Dataset metadata naming: `{target}_training_dataset_{hourly|daily}.pkl` (prefixed variants: `{prefix}_{target}_...`)
+Default checkpoint naming: `models/tft{target}{Hourly|Daily}Checkpoint.ckpt` (e.g., `models/tftspeedHourlyCheckpoint.ckpt`)
+Named-variant naming (via `--checkpoint-prefix`): `models/{prefix}{target}{Hourly|Daily}Checkpoint.ckpt`
+Dataset metadata naming: `models/{target}_training_dataset_{hourly|daily}.pkl` (prefixed variants: `models/{prefix}_{target}_...`)
 
 ## Data Flow
 
 ```
 Environment Canada + Squamish Windsports
     ↓ (collect_data.py — historical; ec_scrape.py + sws_pull.py — live)
-Per-station CSVs + sws_wind_database.csv + SQLite DB (weather_data_hourly.db)
+web_data/{station}.csv + web_data/sws_wind_database.csv + web_data/weather_data_hourly.db
     ↓ (build_dataset.py)
-hourly_database.csv  daily_database.csv
+training_data/hourly_database.csv  training_data/daily_database.csv
     ↓ (train.py --mode hourly|daily)
-TFT checkpoints (.ckpt) + dataset metadata (.pkl)
+models/tft*Checkpoint.ckpt + models/*_training_dataset_*.pkl
     ↓ (forecast.py)
-hourly_speed_predictions.{csv,json}
-daily_speed_predictions.{csv,json}
+forecasts/hourly_speed_predictions.{csv,json}
+forecasts/daily_speed_predictions.{csv,json}
 ```
 
 Training reads CSV snapshots. Inference reads live data from the SQLite DB + fresh EC forecast scrapes via `update_data.py`.
 
 ## Architecture
 
-**Two parallel model pipelines — hourly and daily — each with 4 separate TFT models** (one per target variable). Quantile outputs (Q1–Q7) drive uncertainty-aware quality scores.
+**Two parallel model pipelines — hourly and daily — each with one TFT model per target variable** (targets configured in `train_config.yaml`). Quantile outputs (Q1–Q7) drive uncertainty-aware quality scores.
 
 | | Hourly | Daily |
 |---|---|---|
 | Encoder length | 12 hours | 5 days |
 | Prediction length | 8 hours | 5 days |
-| Targets | speed, gust, lull, direction | speed, hours_above_20, speed_score, direction_score |
-| Data source | `hourly_database.csv` | `daily_database.csv` |
+| Targets (current) | squamishSpeed | squamishSpeed |
+| Data source | `training_data/hourly_database.csv` | `training_data/daily_database.csv` |
+
+**Column naming convention:**
+- `squamishSpeed` / `squamishGust` / `squamishLull` / `squamishDirection` / `squamishDegC` — SWS sensor at the Squamish spit
+- `{station}DegC` / `{station}KPa` / `{station}Hum` / `{station}Sky` — EC weather stations
+
+The SQLite DB stores SWS columns under legacy names (`speed`, `gust`, `lull`, `direction`, `temperature`). `update_data.py` applies `_DB_COL_RENAME` when reading from the DB so all downstream code uses the `squamish*` convention.
 
 **Feature selection finding (earlier):** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) outperformed configs adding EC temperature forecasts at the epoch counts tested. Currently under re-evaluation — the active `train_config.yaml` uses EC temperatures (DegC) as `real_unknown` for hourly, not pressures. Re-run `feature_selection.py --mode hourly` to compare.
 
@@ -116,12 +124,12 @@ Training reads CSV snapshots. Inference reads live data from the SQLite DB + fre
 **Key modules:**
 - `config.py` — `HourlyConfig` / `DailyConfig` dataclasses; populated from `train_config.yaml` via `from_yaml()`
 - `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist and omits empty feature lists (YAML parses `[]` as `None`); calm-period and time-of-day loss weighting applied here
-- `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; runnable standalone for a DB-only update. Hourly path merges only DB history (no forecast scrape); daily path also merges `pull_forecast_daily()` for DegC real_known features.
+- `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; applies `_DB_COL_RENAME` to map legacy DB column names to `squamish*`; runnable standalone for a DB-only update. Hourly path merges only DB history (no forecast scrape); daily path also merges `pull_forecast_daily()` for DegC real_known features.
 - `forecast.py` — `_warn_missing()` fires before each fill step and prints NaN counts + max consecutive gap per feature; "ALL values missing" indicates a scraper or DB failure.
 - `build_dataset.py` — builds training CSVs; also exports `add_scores_to_df()` used by `update_data.py` for daily inference
 - `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`. (`pull_forecast_hourly()` exists but is no longer called — hourly inference uses only DB encoder window data, not forecast DegC/Sky.)
 - `horizon_eval.py` — plots predicted vs actual at multiple horizons from the live DB; supports `--mode hourly` (1h/4h) and `--mode daily` (1d with Q25–Q75 band)
-- `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)`
+- `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)` for arbitrary date lists; `update_sws_csv()` for incremental append since last CSV entry
 
 ## Key Dependencies
 

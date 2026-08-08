@@ -84,7 +84,7 @@ class _BaseConfig:
 
 @dataclass
 class HourlyConfig(_BaseConfig):
-    data_path: str = 'hourly_database.csv'
+    data_path: str = 'training_data/hourly_database.csv'
     checkpoint_suffix: str = 'Hourly'
 
     encoder_length: int = 12
@@ -114,7 +114,7 @@ class HourlyConfig(_BaseConfig):
 
 @dataclass
 class DailyConfig(_BaseConfig):
-    data_path: str = 'daily_database.csv'
+    data_path: str = 'training_data/daily_database.csv'
     checkpoint_suffix: str = 'Daily'
 
     encoder_length: int = 5

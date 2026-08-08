@@ -26,7 +26,16 @@ load_dotenv()
 
 
 def _db_path() -> Path:
-    return Path(os.getenv('WORKING_DIRECTORY')) / 'weather_data_hourly.db'
+    return Path(os.getenv('WORKING_DIRECTORY')) / 'web_data' / 'weather_data_hourly.db'
+
+
+_DB_COL_RENAME = {
+    'speed':       'squamishSpeed',
+    'gust':        'squamishGust',
+    'lull':        'squamishLull',
+    'direction':   'squamishDirection',
+    'temperature': 'squamishDegC',
+}
 
 
 def _normalize_sky_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -103,6 +112,7 @@ def get_conditions_table_daily(encoder_length: int = 8, prediction_length: int =
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
         .dt.tz_convert('America/Vancouver')
     )
+    df_hist.rename(columns=_DB_COL_RENAME, inplace=True)
 
     df_scored   = add_scores_to_df(df_hist)
     df_forecast = pull_forecast_daily(time_index)
@@ -136,6 +146,7 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
         .dt.tz_convert('America/Vancouver')
     )
+    df_hist.rename(columns=_DB_COL_RENAME, inplace=True)
 
     df_hist.sort_values('datetime', inplace=True)
 

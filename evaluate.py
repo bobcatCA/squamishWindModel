@@ -30,7 +30,7 @@ from tft_common import tft_with_ignore
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY'))
-DB_PATH = WORKING_DIR / 'weather_data_hourly.db'
+DB_PATH = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
 
 _cfg = HourlyConfig.from_yaml()
 ENCODER_LENGTH  = _cfg.encoder_length
@@ -52,8 +52,8 @@ UNITS = {'speed': 'kts', 'gust': 'kts', 'lull': 'kts', 'direction': 'deg'}
 
 def _load_model_and_dataset(prefix: str, target: str):
     pkl_prefix = '' if prefix == 'tft' else f'{prefix}_'
-    ckpt = WORKING_DIR / f'{prefix}{target}HourlyCheckpoint.ckpt'
-    pkl  = WORKING_DIR / f'{pkl_prefix}{target}_training_dataset_hourly.pkl'
+    ckpt = WORKING_DIR / 'models' / f'{prefix}{target}HourlyCheckpoint.ckpt'
+    pkl  = WORKING_DIR / 'models' / f'{pkl_prefix}{target}_training_dataset_hourly.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
         training_dataset = torch.load(pkl, weights_only=False)
     model = tft_with_ignore.load_from_checkpoint(ckpt)
@@ -211,7 +211,7 @@ def run_compare(n_windows: int = 100) -> None:
     all_results: dict[str, dict] = {}
     for label, prefix in COMPARE_MODELS:
         missing = [t for t in TARGETS
-                   if not (WORKING_DIR / f'{prefix}{t}HourlyCheckpoint.ckpt').exists()]
+                   if not (WORKING_DIR / 'models' / f'{prefix}{t}HourlyCheckpoint.ckpt').exists()]
         if missing:
             print(f'\nSkipping {label!r} — missing checkpoints: {missing}')
             continue

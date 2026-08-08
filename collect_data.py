@@ -21,7 +21,7 @@ import requests
 from dateutil import rrule
 from dotenv import load_dotenv
 
-from sws_pull import get_sws_df
+from sws_pull import get_sws_df, update_sws_csv
 
 load_dotenv()
 
@@ -90,8 +90,78 @@ def download_ec_history(end: str = None) -> None:
         out = pd.concat(frames, ignore_index=True)
         out['Date/Time (LST)'] = pd.to_datetime(out['Date/Time (LST)'])
         out['Temp (°C)'] = pd.to_numeric(out['Temp (°C)'], errors='coerce')
-        out.to_csv(f'{name}.csv', index=False)
-        print(f'  Saved {name}.csv  ({len(out):,} rows)')
+        out.to_csv(f'web_data/{name}.csv', index=False)
+        print(f'  Saved web_data/{name}.csv  ({len(out):,} rows)')
+
+
+def update_ec_history(end: str = None) -> None:
+    """Append new EC data to each station CSV since its last recorded timestamp."""
+    end_dt = datetime.strptime(end, '%b%Y') if end else datetime.now().replace(day=1)
+    delay  = 0.4
+
+    for name, station_id in EC_STATIONS.items():
+        csv_path = Path(f'web_data/{name}.csv')
+        if not csv_path.exists():
+            print(f'\n{name}: {csv_path} not found — skipping (run --ec-only to build from scratch)')
+            continue
+
+        existing = pd.read_csv(csv_path)
+        existing['Date/Time (LST)'] = pd.to_datetime(existing['Date/Time (LST)'])
+        if existing.empty:
+            print(f'\n{name}: CSV is empty — skipping')
+            continue
+
+        # Base start month on the last row with actual temperature data.
+        valid_temps = existing.loc[existing['Temp (°C)'].notna(), 'Date/Time (LST)']
+        last_dt  = valid_temps.max() if not valid_temps.empty else existing['Date/Time (LST)'].max()
+        start_dt = last_dt.replace(day=1)
+
+        # Scan the most recent 4 months for sparse/placeholder months (< 50% non-NaN
+        # temperature) and strip those rows so they get cleanly re-fetched below.
+        recent_start = start_dt - pd.DateOffset(months=3)
+        recent_rows  = existing[existing['Date/Time (LST)'] >= recent_start].copy()
+        recent_rows['_month'] = recent_rows['Date/Time (LST)'].dt.to_period('M')
+        completeness = recent_rows.groupby('_month')['Temp (°C)'].apply(
+            lambda x: x.notna().mean()
+        )
+        current_period = pd.Timestamp.now().to_period('M')
+        sparse = completeness[
+            (completeness < 0.5) & (completeness.index < current_period)
+        ].index
+        if not sparse.empty:
+            first_sparse = sparse.min().to_timestamp()
+            drop_mask = existing['Date/Time (LST)'].dt.to_period('M').isin(sparse)
+            existing = existing[~drop_mask].reset_index(drop=True)
+            start_dt = min(start_dt, first_sparse)
+            print(f'  Stripped {int(drop_mask.sum()):,} placeholder rows from '
+                  f'{[str(s) for s in sparse]} — will re-fetch')
+        months    = list(rrule.rrule(rrule.MONTHLY, dtstart=start_dt, until=end_dt))
+
+        print(f'\n{name} (ID {station_id}) — {len(months)} months ({start_dt.strftime("%b%Y")} → {end_dt.strftime("%b%Y")})')
+        frames = []
+        for i, dt in enumerate(months):
+            df = _fetch_station_month(station_id, dt.year, dt.month)
+            if not df.empty:
+                frames.append(df)
+            time.sleep(delay)
+
+        if not frames:
+            print('  No new data.')
+            continue
+
+        new_data = pd.concat(frames, ignore_index=True)
+        new_data['Date/Time (LST)'] = pd.to_datetime(new_data['Date/Time (LST)'])
+        new_data['Temp (°C)'] = pd.to_numeric(new_data['Temp (°C)'], errors='coerce')
+
+        combined = (
+            pd.concat([existing, new_data], ignore_index=True)
+            .drop_duplicates(subset=['Date/Time (LST)'])
+            .sort_values('Date/Time (LST)')
+            .reset_index(drop=True)
+        )
+        combined.to_csv(csv_path, index=False)
+        added = len(combined) - len(existing)
+        print(f'  Added {added:,} rows → {csv_path} now has {len(combined):,} rows total')
 
 
 # ── SWS historical download ───────────────────────────────────────────────────
@@ -113,8 +183,8 @@ def download_sws_history(start: str = SWS_START, end: str = None) -> None:
     if df.empty:
         print('  No SWS data returned.')
         return
-    df.to_csv('sws_wind_database.csv', index=False)
-    print(f'  Saved sws_wind_database.csv  ({len(df):,} rows)')
+    df.to_csv('web_data/sws_wind_database.csv', index=False)
+    print(f'  Saved web_data/sws_wind_database.csv  ({len(df):,} rows)')
 
 
 # ── DB initialisation ─────────────────────────────────────────────────────────
@@ -138,7 +208,7 @@ CREATE TABLE IF NOT EXISTS weather (
 
 def init_db(db_path: Path = None) -> None:
     if db_path is None:
-        db_path = Path(os.getenv('WORKING_DIRECTORY', '.')) / 'weather_data_hourly.db'
+        db_path = Path(os.getenv('WORKING_DIRECTORY', '.')) / 'web_data' / 'weather_data_hourly.db'
     with sqlite3.connect(db_path) as conn:
         conn.execute(_CREATE_WEATHER)
         conn.commit()
@@ -150,9 +220,11 @@ def init_db(db_path: Path = None) -> None:
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description='Download historical weather data')
     mode = p.add_mutually_exclusive_group()
-    mode.add_argument('--ec-only',   action='store_true', help='Only download EC station CSVs')
-    mode.add_argument('--sws-only',  action='store_true', help='Only download SWS wind data')
-    mode.add_argument('--init-db',   action='store_true', help='Only initialise the SQLite DB')
+    mode.add_argument('--ec-only',    action='store_true', help='Only download EC station CSVs (full rebuild)')
+    mode.add_argument('--ec-update',  action='store_true', help='Append EC data since last CSV entry for each station')
+    mode.add_argument('--sws-only',   action='store_true', help='Only download SWS wind data (full rebuild)')
+    mode.add_argument('--sws-update', action='store_true', help='Append SWS data since the last CSV entry')
+    mode.add_argument('--init-db',    action='store_true', help='Only initialise the SQLite DB')
     p.add_argument('--ec-end',  metavar='MonYYYY', help='Last month to download for EC (e.g. Jun2026)')
     p.add_argument('--sws-start', default=SWS_START, help=f'SWS start date (default: {SWS_START})')
     p.add_argument('--sws-end',   help='SWS end date YYYY-MM-DD (default: today)')
@@ -160,8 +232,12 @@ if __name__ == '__main__':
 
     if args.init_db:
         init_db()
+    elif args.ec_update:
+        update_ec_history(end=args.ec_end)
     elif args.ec_only:
         download_ec_history(end=args.ec_end)
+    elif args.sws_update:
+        update_sws_csv()
     elif args.sws_only:
         download_sws_history(start=args.sws_start, end=args.sws_end)
     else:

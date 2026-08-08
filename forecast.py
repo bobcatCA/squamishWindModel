@@ -69,8 +69,8 @@ def _prepare_hourly(update: bool = True) -> pd.DataFrame:
 
 def _predict_hourly_target(data: pd.DataFrame, target: str,
                             forecast_q: int = 4) -> pd.DataFrame:
-    ckpt_model   = WORKING_DIR / f'tft{target}HourlyCheckpoint.ckpt'
-    ckpt_dataset = WORKING_DIR / f'{target}_training_dataset_hourly.pkl'
+    ckpt_model   = WORKING_DIR / 'models' / f'tft{target}HourlyCheckpoint.ckpt'
+    ckpt_dataset = WORKING_DIR / 'models' / f'{target}_training_dataset_hourly.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
         training_dataset = torch.load(ckpt_dataset, weights_only=False)
     inference_ds = TimeSeriesDataSet.from_dataset(
@@ -84,7 +84,7 @@ def _predict_hourly_target(data: pd.DataFrame, target: str,
     pred_start = raw.index['time_idx'].max()
     y_mid = raw.output.prediction[:, :, forecast_q].numpy().reshape(-1)
     dt_pred = data['datetime'].iloc[pred_start:len(data)]
-    if any(name in target for name in ('direction', 'lull', 'gust')):
+    if any(name in target for name in ('Direction', 'direction', 'lull', 'Lull', 'gust', 'Gust')):
         return pd.DataFrame({
             'datetime': dt_pred,
             target: y_mid,
@@ -95,11 +95,16 @@ def _predict_hourly_target(data: pd.DataFrame, target: str,
 
 
 def _compute_hourly_quality(df: pd.DataFrame) -> pd.DataFrame:
-    df['sailing_window'] = df['speed'] > 15
-    df['speed_score'] = (df['gust'] - df['lull']) / df['speed']
-    df['speed_score'] = np.clip(round(df['speed_score'] * -2.22 + 5.444), 1, 5)
-    df['direction_score'] = np.clip(round((df['direction_Q7'] - df['direction_Q1']) / -22 + 12), 1, 5)
-    df.loc[~df['sailing_window'], ['speed_score', 'direction_score']] = 0
+    df['sailing_window'] = df['squamishSpeed'] > 15
+    if {'squamishGust', 'squamishLull'}.issubset(df.columns):
+        df['speed_score'] = (df['squamishGust'] - df['squamishLull']) / df['squamishSpeed'].replace(0, np.nan)
+        df['speed_score'] = np.clip(round(df['speed_score'] * -2.22 + 5.444), 1, 5)
+        df.loc[~df['sailing_window'], 'speed_score'] = 0
+    if {'squamishDirection_Q1', 'squamishDirection_Q7'}.issubset(df.columns):
+        df['direction_score'] = np.clip(
+            round((df['squamishDirection_Q7'] - df['squamishDirection_Q1']) / -22 + 12), 1, 5
+        )
+        df.loc[~df['sailing_window'], 'direction_score'] = 0
     return df
 
 
@@ -111,9 +116,10 @@ def run_hourly(update: bool = True) -> None:
         df_t = _predict_hourly_target(data, target)
         df_out = df_t if df_out.empty else df_out.merge(df_t, on='datetime', how='outer')
     df_out = _compute_hourly_quality(df_out)
-    df_out = df_out[['datetime', 'speed', 'speed_score', 'direction_score']]
-    df_out.to_csv(WORKING_DIR / 'hourly_speed_predictions.csv', index=False)
-    df_out.to_json(WORKING_DIR / 'hourly_speed_predictions.json', orient='records', lines=True, date_format='iso')
+    quality_cols = [c for c in ('speed_score', 'direction_score', 'sailing_window') if c in df_out.columns]
+    df_out = df_out[['datetime'] + _hcfg.targets + quality_cols]
+    df_out.to_csv(WORKING_DIR / 'forecasts' / 'hourly_speed_predictions.csv', index=False)
+    df_out.to_json(WORKING_DIR / 'forecasts' / 'hourly_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Hourly forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
 
 
@@ -140,7 +146,7 @@ def _prepare_daily(update: bool = True) -> pd.DataFrame:
 
 def _predict_daily_target(data: pd.DataFrame, target: str,
                            forecast_q: int = 3) -> pd.DataFrame:
-    ckpt_dataset = WORKING_DIR / f'{target}_training_dataset_daily.pkl'
+    ckpt_dataset = WORKING_DIR / 'models' / f'{target}_training_dataset_daily.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
         training_dataset = torch.load(ckpt_dataset, weights_only=False)
     inference_ds = TimeSeriesDataSet.from_dataset(
@@ -149,7 +155,7 @@ def _predict_daily_target(data: pd.DataFrame, target: str,
     loader = inference_ds.to_dataloader(
         train=False, batch_size=len(inference_ds), shuffle=False, num_workers=4,
     )
-    ckpt_model = WORKING_DIR / f'tft{target}DailyCheckpoint.ckpt'
+    ckpt_model = WORKING_DIR / 'models' / f'tft{target}DailyCheckpoint.ckpt'
     model = tft_with_ignore.load_from_checkpoint(ckpt_model)
     model.eval()
     raw = model.predict(loader, mode='raw', return_index=True, return_x=True)
@@ -166,8 +172,8 @@ def run_daily(update: bool = True) -> None:
     for target in _dcfg.targets:
         df_t = _predict_daily_target(data, target)
         df_out = df_t if df_out.empty else df_out.merge(df_t, on='datetime', how='outer')
-    df_out.to_csv(WORKING_DIR / 'daily_speed_predictions.csv', index=False)
-    df_out.to_json(WORKING_DIR / 'daily_speed_predictions.json', orient='records', lines=True, date_format='iso')
+    df_out.to_csv(WORKING_DIR / 'forecasts' / 'daily_speed_predictions.csv', index=False)
+    df_out.to_json(WORKING_DIR / 'forecasts' / 'daily_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Daily forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
 
 

@@ -103,7 +103,7 @@ def train_model(config) -> None:
                   f'({int(in_window.sum()):,} of {len(data):,} rows)')
 
         if config.calm_weight_threshold > 0.0:
-            calm = data['speed'] < config.calm_weight_threshold
+            calm = data[config.targets[0]] < config.calm_weight_threshold
             data.loc[calm, 'weight'] *= config.calm_weight_value
             action = 'ignored' if config.calm_weight_value == 0.0 else f'weighted ×{config.calm_weight_value}'
             print(f'  Calm weighting: speed < {config.calm_weight_threshold} kts {action} '
@@ -120,7 +120,7 @@ def train_model(config) -> None:
         print(f'\nTraining {target} ({config.checkpoint_suffix})')
 
         training = _build_dataset(data, target, config, cutoff)
-        training.save(f'{pkl_prefix}{target}_training_dataset_{config.checkpoint_suffix.lower()}.pkl')
+        training.save(f'models/{pkl_prefix}{target}_training_dataset_{config.checkpoint_suffix.lower()}.pkl')
 
         val_data = data if config.val_full_data else data[data.time_idx > cutoff]
         validation = TimeSeriesDataSet.from_dataset(
@@ -189,5 +189,5 @@ def train_model(config) -> None:
         )
         trainer.fit(tft, train_dl, val_dl)
         trainer.save_checkpoint(
-            f'{config.checkpoint_prefix}{target}{config.checkpoint_suffix}Checkpoint.ckpt'
+            f'models/{config.checkpoint_prefix}{target}{config.checkpoint_suffix}Checkpoint.ckpt'
         )
