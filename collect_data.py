@@ -200,8 +200,8 @@ CREATE TABLE IF NOT EXISTS weather (
     vancouverDegC REAL, vancouverKPa  REAL, vancouverSky  TEXT,
     victoriaDegC  REAL, victoriaKPa   REAL, victoriaSky   TEXT,
     whistlerDegC  REAL, whistlerKPa   REAL, whistlerSky   TEXT,
-    speed         REAL, gust          REAL, lull          REAL,
-    direction     REAL, temperature   REAL
+    squamishSpeed REAL, squamishGust   REAL, squamishLull  REAL,
+    squamishDirection REAL, squamishDegC REAL
 )
 """
 

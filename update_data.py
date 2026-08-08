@@ -91,6 +91,7 @@ def update_db() -> None:
         df_recent = pd.merge_asof(df_recent_weather, df_sws, on='datetime', direction='nearest')
     else:
         df_recent = df_recent_weather
+    df_recent.rename(columns=_DB_COL_RENAME, inplace=True)
     _insert_rows(df_recent)
 
 
@@ -112,7 +113,6 @@ def get_conditions_table_daily(encoder_length: int = 8, prediction_length: int =
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
         .dt.tz_convert('America/Vancouver')
     )
-    df_hist.rename(columns=_DB_COL_RENAME, inplace=True)
 
     df_scored   = add_scores_to_df(df_hist)
     df_forecast = pull_forecast_daily(time_index)
@@ -146,7 +146,6 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
         pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
         .dt.tz_convert('America/Vancouver')
     )
-    df_hist.rename(columns=_DB_COL_RENAME, inplace=True)
 
     df_hist.sort_values('datetime', inplace=True)
 
