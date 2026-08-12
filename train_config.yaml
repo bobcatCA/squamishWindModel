@@ -6,7 +6,7 @@ data:
   # Applied at training time — the CSV is unaffected and can still be inspected.
   # Both start and end dates are inclusive. To disable, set to an empty list: []
   mask_intervals:
-    - start: "2021-01-01"
+    - start: "2020-01-01"
       end:   "2024-12-31"
 
 
@@ -35,7 +35,7 @@ data:
 #     vancouverSky   whistlerSky   comoxSky     victoriaSky
 #
 #   Temporal          — always known
-#     sin_hour  year_fraction  hour  month  day
+#     year_fraction  hour  month  day
 #
 #   SWS local sensor  — unknown
 #     temperature     (local Squamish temperature from SWS sensor)
@@ -48,9 +48,9 @@ hourly:
   data_path: training_data/hourly_database.csv
 
   # Sequence lengths
-  encoder_length: 12        # hours of history to feed in
+  encoder_length: 2        # hours of history to feed in
   prediction_length: 8      # hours ahead to forecast
-  min_encoder_length: 10    # shortest encoder window allowed during training
+  min_encoder_length: 1    # shortest encoder window allowed during training
   min_prediction_length: 8
 
   # Wind variables to predict (one model trained per target)
@@ -59,8 +59,6 @@ hourly:
 
   # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
-    # - wind_hour       # asymmetric cosine: 0 outside 10am-6pm, peak 1.0 at 1pm
-    # - sin_hour
     # - year_fraction
     # Temperatures: feature selection (rounds 1–3) showed adding EC temps consistently
     # hurts at production epoch counts — pressures alone generalise better.
@@ -73,20 +71,25 @@ hourly:
 
   # Features only available in the past (measured, not forecast)
   real_unknown:
-    #- comoxDegC
-    #- comoxKPa
+    - ballenasDegC
+    - ballenasKPa
+    - comoxDegC
+    - comoxHum
+    - comoxKPa
     - lillooetDegC
-    #- lillooetKPa
+    - lillooetKPa
     - pamDegC
-    #- pamKPa
+    - pamHum
+    - pamKPa
     - pembertonDegC
-    #- pembertonKPa
+    - pembertonKPa
     - squamishDegC
-    - squamishDirection
+    #- squamishDirection
     - vancouverDegC
-    #- vancouverKPa
+    - vancouverHum
+    - vancouverKPa
     - whistlerDegC    
-    #- whistlerKPa
+    - whistlerKPa
     
     # - ballenasKPa     # 8.6% NaN — usable but not needed
     # - whistlerKPa     # 33.6% NaN — too sparse
@@ -96,7 +99,7 @@ hourly:
     # - lull_relative
 
   # Categorical features (must be strings in the CSV)
-  categorical: []
+  categorical:
     # - vancouverSky
     # - comoxSky
     # - victoriaSky
@@ -120,18 +123,17 @@ hourly:
   val_full_data: false      # use only post-cutoff rows for validation
   val_predict_mode: false
 
-  # Time-of-day sample weighting.  Set sample_weight_boost > 1.0 to up-weight
-  # prediction timesteps in [weight_target_start_hour, weight_target_end_hour).
-  # 1.0 = no weighting (default).
-  sample_weight_boost: 1.0
-  weight_target_start_hour: 10
-  weight_target_end_hour: 18
+  # simple_model.py ONLY (not read by the TFT pipeline above). Symmetric
+  # peak/trough loss weighting: squared error on rows far from the training
+  # target's mean, in EITHER direction, is scaled up to (1+spread_weight)x.
+  # 0.0 = plain unweighted MSE. Override per-run with --spread-weight.
+  spread_weight: 0.0
 
-  # Calm-period weighting.  Timesteps where speed < calm_weight_threshold are
-  # multiplied by calm_weight_value in the loss.  0.0 = exclude entirely.
-  # Set calm_weight_threshold to 0.0 to disable.
-  calm_weight_threshold: 0.0
-  calm_weight_value: 1.0
+  # simple_model.py ONLY. One-sided: does NOT care about troughs. Weight ~0
+  # for calm readings, ramping to 1.0 at the strongest reading, as
+  # (actual/max)^strength_weight. Takes priority over spread_weight if both
+  # are nonzero. 0.0 = off. Override per-run with --strength-weight.
+  strength_weight: 0.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 daily:

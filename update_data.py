@@ -14,7 +14,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 
-from build_dataset import add_scores_to_df
+from build_dataset import add_scores_to_df, wind_to_hourly_index
 from ec_scrape import (
     normalize_sky_series,
     pull_forecast_daily,
@@ -85,13 +85,16 @@ def update_db() -> None:
     except Exception as e:
         print(f'Warning: SWS pull failed ({e}), continuing without wind data')
         df_sws = pd.DataFrame()
+
     if not df_sws.empty:
-        df_recent_weather['datetime'] = df_recent_weather['datetime'].dt.as_unit('us')
-        df_sws['datetime'] = df_sws['datetime'].dt.as_unit('us')
-        df_recent = pd.merge_asof(df_recent_weather, df_sws, on='datetime', direction='nearest')
+        # Average raw (few-minutes-resolution) SWS readings within ±10min of each
+        # EC on-hour timestamp, same aggregation used when building training CSVs.
+        df_sws = df_sws.rename(columns=_DB_COL_RENAME).set_index('datetime')
+        df_wind = wind_to_hourly_index(df_sws, df_recent_weather['datetime'])
+        df_recent = df_recent_weather.merge(df_wind, left_on='datetime', right_index=True, how='left')
     else:
         df_recent = df_recent_weather
-    df_recent.rename(columns=_DB_COL_RENAME, inplace=True)
+
     _insert_rows(df_recent)
 
 
@@ -152,13 +155,7 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
     df = pd.DataFrame({'datetime': time_index})
     df = df.merge(df_hist, on='datetime', how='left')
 
-    df['sin_hour']      = np.sin(2 * np.pi * df['datetime'].dt.hour / 24)
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-    _h = df['datetime'].dt.hour
-    df['wind_hour']     = np.where(
-        (_h >= 10) & (_h <= 13), 0.5 * (1 - np.cos(np.pi * (_h - 10) / 3)),
-        np.where((_h > 13) & (_h < 18), 0.5 * (1 + np.cos(np.pi * (_h - 13) / 5)), 0.0)
-    )
 
     num_cols = df.select_dtypes(include='number').columns
     df[num_cols] = df[num_cols].interpolate(limit=1)

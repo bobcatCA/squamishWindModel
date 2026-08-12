@@ -52,8 +52,6 @@ def _build_dataset(data: pd.DataFrame, target: str, config,
         kwargs['time_varying_known_reals'] = config.real_known or []
     if config.allow_missing_timesteps:
         kwargs['allow_missing_timesteps'] = True
-    if 'weight' in data.columns:
-        kwargs['weight'] = 'weight'
     return TimeSeriesDataSet(data[data.time_idx <= cutoff], **kwargs)
 
 
@@ -89,25 +87,6 @@ def train_model(config) -> None:
     data['static'] = 'S'
     data['time_idx'] = np.arange(len(data))
     data = data.reset_index(drop=True)
-
-    use_weighting = (config.sample_weight_boost > 1.0 or config.calm_weight_threshold > 0.0)
-    if use_weighting:
-        data['weight'] = 1.0
-
-        if config.sample_weight_boost > 1.0:
-            hour = data['datetime'].dt.hour
-            in_window = (hour >= config.weight_target_start_hour) & (hour < config.weight_target_end_hour)
-            data.loc[in_window, 'weight'] *= float(config.sample_weight_boost)
-            print(f'  Time-of-day weighting: {config.sample_weight_boost}× for hours '
-                  f'{config.weight_target_start_hour}–{config.weight_target_end_hour} '
-                  f'({int(in_window.sum()):,} of {len(data):,} rows)')
-
-        if config.calm_weight_threshold > 0.0:
-            calm = data[config.targets[0]] < config.calm_weight_threshold
-            data.loc[calm, 'weight'] *= config.calm_weight_value
-            action = 'ignored' if config.calm_weight_value == 0.0 else f'weighted ×{config.calm_weight_value}'
-            print(f'  Calm weighting: speed < {config.calm_weight_threshold} kts {action} '
-                  f'({int(calm.sum()):,} of {len(data):,} rows)')
 
     cutoff = config.training_cutoff(data['time_idx'].max())
     loss_fn = QuantileLoss()

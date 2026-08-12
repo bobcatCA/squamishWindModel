@@ -58,17 +58,19 @@ class _BaseConfig:
     # to save named variants without disturbing the production checkpoints.
     checkpoint_prefix: str = 'tft'
 
-    # Time-of-day sample weighting — set sample_weight_boost > 1.0 to up-weight
-    # prediction timesteps that fall in [weight_target_start_hour, weight_target_end_hour).
-    sample_weight_boost: float = 1.0
-    weight_target_start_hour: int = 10
-    weight_target_end_hour: int = 18
+    # Symmetric peak/trough loss weighting for simple_model.py's plain NN
+    # ONLY (not read by the TFT pipeline). Squared error on rows far from the
+    # training target's mean — in EITHER direction — is scaled up to
+    # (1+spread_weight)x. 0.0 = plain unweighted MSE. Override with
+    # `python simple_model.py --spread-weight N`.
+    spread_weight: float = 0.0
 
-    # Calm-period weighting.  Rows where speed < calm_weight_threshold are
-    # multiplied by calm_weight_value (0.0 = exclude from loss entirely).
-    # Set calm_weight_threshold to 0.0 to disable.
-    calm_weight_threshold: float = 0.0
-    calm_weight_value: float = 0.0
+    # One-sided strength weighting for simple_model.py ONLY. Unlike
+    # spread_weight, this does NOT care about troughs — weight ~0 for calm
+    # readings, ramping up to 1.0 at the strongest reading, as
+    # (actual/max)^strength_weight. Takes priority over spread_weight if both
+    # are set. 0.0 = off. Override with `python simple_model.py --strength-weight N`.
+    strength_weight: float = 0.0
 
     @classmethod
     def _from_yaml(cls, section: str, yaml_path: Path = CONFIG_YAML):

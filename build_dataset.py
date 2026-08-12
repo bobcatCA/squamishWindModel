@@ -40,14 +40,20 @@ STATIONS = {
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
 def _load_station(filename: str, has_sky: bool, name: str) -> pd.DataFrame:
-    """Load one EC station CSV → tz-aware DatetimeIndex, prefixed column names."""
+    """Load one EC station CSV → tz-aware DatetimeIndex, prefixed column names.
+
+    'Date/Time (LST)' is Environment Canada's *Local Standard Time* — a fixed
+    UTC-8 offset that does NOT observe daylight saving (verified: EC's raw CSVs
+    run continuously through both DST transitions, with no repeated/skipped
+    hour). Localizing it directly to the DST-aware 'America/Vancouver' zone
+    would shift every summer timestamp by an hour, so first anchor it to UTC
+    at the fixed +8h offset, then convert to local wall-clock time.
+    """
     cols = [TIME_COL, TEMP_COL, PRESS_COL, HUM_COL] + ([SKY_COL] if has_sky else [])
     df = pd.read_csv(filename, usecols=cols)
     df[HUM_COL] = pd.to_numeric(df[HUM_COL], errors='coerce')
 
-    idx = pd.to_datetime(df[TIME_COL]).dt.tz_localize(
-        TZ, nonexistent='shift_forward', ambiguous='NaT'
-    )
+    idx = (pd.to_datetime(df[TIME_COL]) + pd.Timedelta(hours=8)).dt.tz_localize('UTC').dt.tz_convert(TZ)
     df = df.drop(columns=[TIME_COL])
     df.index = idx
     df.index.name = 'datetime'
@@ -59,8 +65,11 @@ def _load_station(filename: str, has_sky: bool, name: str) -> pd.DataFrame:
     return df.rename(columns=rename)
 
 
+SWS_MERGE_TOLERANCE = pd.Timedelta('10min')
+
+
 def _load_wind(filename: str) -> pd.DataFrame:
-    """Load SWS CSV → resample to hourly → squamish-prefixed column names."""
+    """Load SWS CSV → tz-aware DatetimeIndex, squamish-prefixed column names (raw, un-aggregated)."""
     df = pd.read_csv(filename)
     df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert(TZ)
     df = df.sort_values('datetime').drop_duplicates(subset='datetime').set_index('datetime')
@@ -72,15 +81,7 @@ def _load_wind(filename: str) -> pd.DataFrame:
         while (df['temperature'].abs() > 50).any():
             df.loc[df['temperature'].abs() > 50, 'temperature'] /= 10
 
-    # Average direction via unit-vector decomposition to avoid wrap-around artefacts
-    df['dir_sin'] = np.sin(np.radians(df['direction']))
-    df['dir_cos'] = np.cos(np.radians(df['direction']))
-    scalar_cols = [c for c in ('speed', 'gust', 'lull', 'temperature') if c in df.columns]
-    hourly = df[scalar_cols + ['dir_sin', 'dir_cos']].resample('h').mean()
-    hourly['direction'] = np.degrees(np.arctan2(hourly['dir_sin'], hourly['dir_cos'])) % 360
-    hourly = hourly[scalar_cols + ['direction']].dropna(how='all')
-
-    return hourly.rename(columns={
+    return df.rename(columns={
         'speed':       'squamishSpeed',
         'gust':        'squamishGust',
         'lull':        'squamishLull',
@@ -89,28 +90,62 @@ def _load_wind(filename: str) -> pd.DataFrame:
     })
 
 
+def wind_to_hourly_index(df_wind: pd.DataFrame, hourly_index: pd.DatetimeIndex,
+                          tolerance: pd.Timedelta = SWS_MERGE_TOLERANCE) -> pd.DataFrame:
+    """Aggregate raw SWS readings onto *hourly_index*.
+
+    Every reading is matched to the nearest timestamp in *hourly_index*
+    (dropped if none falls within *tolerance*), then all readings matched to
+    the same hour are averaged. Comparisons run on tz-aware timestamps
+    directly, so DST transitions can't shift a reading into the wrong bin.
+    """
+    hours = pd.DataFrame({'datetime': pd.DatetimeIndex(hourly_index).sort_values().unique()})
+    hours['hour'] = hours['datetime']
+
+    wind = df_wind.sort_index().reset_index()
+    matched = pd.merge_asof(wind, hours, on='datetime', direction='nearest', tolerance=tolerance)
+    matched = matched.dropna(subset=['hour'])
+
+    # Average direction via unit-vector decomposition to avoid wrap-around artefacts
+    matched['dir_sin'] = np.sin(np.radians(matched['squamishDirection']))
+    matched['dir_cos'] = np.cos(np.radians(matched['squamishDirection']))
+    scalar_cols = [c for c in ('squamishSpeed', 'squamishGust', 'squamishLull', 'squamishDegC')
+                   if c in matched.columns]
+
+    grouped = matched.groupby('hour')[scalar_cols + ['dir_sin', 'dir_cos']].mean()
+    grouped['squamishDirection'] = np.degrees(np.arctan2(grouped['dir_sin'], grouped['dir_cos'])) % 360
+    grouped = grouped[scalar_cols + ['squamishDirection']]
+    grouped.index.name = 'datetime'
+    return grouped
+
+
 # ── Hourly dataset ────────────────────────────────────────────────────────────
 
 def build_hourly(out_path: str = 'training_data/hourly_database.csv') -> pd.DataFrame:
-    df_wind = _load_wind('web_data/sws_wind_database.csv')
-    print(f'SWS: {len(df_wind):,} hourly rows  ({df_wind.index.min()} → {df_wind.index.max()})')
-
     ec = {name: _load_station(f, sky, name) for name, (f, sky) in STATIONS.items()}
-    df_ec = pd.concat(ec.values(), axis=1)
+    df_ec = pd.concat(ec.values(), axis=1).sort_index()
+    print(f'EC: {len(df_ec):,} hourly rows  ({df_ec.index.min()} → {df_ec.index.max()})')
 
-    df = df_wind.join(df_ec, how='left').reset_index()
+    df_wind_raw = _load_wind('web_data/sws_wind_database.csv')
+    df_wind = wind_to_hourly_index(df_wind_raw, df_ec.index)
+    matched = df_wind['squamishSpeed'].notna().sum()
+    tolerance_min = int(SWS_MERGE_TOLERANCE.total_seconds() // 60)
+    print(f'SWS: {matched:,} of {len(df_ec):,} EC hours matched '
+          f'(±{tolerance_min}min) from {len(df_wind_raw):,} raw readings')
 
-    # Fill zero for missing SWS readings (calm / sensor down)
+    df = df_ec.join(df_wind, how='left').reset_index()
+
+    # Drop hours with no genuine wind reading. A missing SWS match (sensor off —
+    # mainly outside the May-Sept season) and a reported 0 kt reading are both
+    # stored as 0 and are indistinguishable from each other, so both are dropped
+    # rather than anchoring the model on a large mass of spurious/off-season zeros.
     wind_cols = ['squamishSpeed', 'squamishGust', 'squamishLull', 'squamishDirection']
+    before = len(df)
+    df = df[df['squamishSpeed'].fillna(0) != 0].reset_index(drop=True)
+    print(f'Dropped {before - len(df):,} of {before:,} rows (squamishSpeed missing or 0)')
     df[wind_cols] = df[wind_cols].fillna(0)
 
     # Temporal features
-    h = df['datetime'].dt.hour
-    df['sin_hour']     = np.sin(2 * np.pi * h / 24)
-    df['wind_hour']    = np.where(
-        (h >= 10) & (h <= 13), 0.5 * (1 - np.cos(np.pi * (h - 10) / 3)),
-        np.where((h > 13) & (h < 18), 0.5 * (1 + np.cos(np.pi * (h - 13) / 5)), 0.0)
-    )
     df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
 
     for col in df.columns:

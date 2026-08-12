@@ -30,7 +30,6 @@ python train.py --mode daily            # targets defined in train_config.yaml
 # Optional overrides: --epochs N --dropout F --hidden-size N --lr F --targets speed gust --no-lr-find
 # Named experiment variants (saves to separate checkpoints, leaves production checkpoints intact):
 #   --checkpoint-prefix tftExp    e.g. tftExpspeedHourlyCheckpoint.ckpt
-#   --weight-boost 3.0            up-weight 10AM–6PM prediction timesteps by 3× during training
 
 # 4. Update the SQLite DB with the latest EC + SWS observations (no forecast generated)
 python update_data.py
@@ -47,10 +46,6 @@ python forecast.py --mode daily
 # Evaluate model accuracy against historical DB data
 python evaluate.py --start 2025-06-20
 
-# Compare two named model variants on the 2023 holdout across all 4 targets
-python evaluate.py --compare            # expects tftBase* and tftWeighted* checkpoints
-python evaluate.py --compare --windows 100
-
 # Plot predicted vs actual at multiple forecast horizons (1h/4h hourly; 1d daily)
 python horizon_eval.py                        # hourly, all targets, stride=4h
 python horizon_eval.py --mode daily           # daily, all targets, stride=1d
@@ -66,9 +61,7 @@ python feature_selection.py --mode daily  --epochs 3
 
 All model hyperparameters and feature lists live in `train_config.yaml` — it is the single source of truth. The Python dataclass defaults in `config.py` are fallbacks only; always edit the YAML. The `data.mask_intervals` section excludes known-bad sensor periods at training time without altering the CSV.
 
-Notable YAML keys beyond features and sequence lengths: `sample_weight_boost` / `weight_target_start_hour` / `weight_target_end_hour` control time-of-day loss weighting during training; `calm_weight_threshold` / `calm_weight_value` down-weight or exclude calm-period timesteps from the loss (set threshold to 0.0 to disable); `val_full_data` / `val_predict_mode` control validation dataset construction (differ between hourly and daily).
-
-CLI overrides: `--calm-weight F` overrides `calm_weight_value` at runtime.
+Notable YAML keys beyond features and sequence lengths: `val_full_data` / `val_predict_mode` control validation dataset construction (differ between hourly and daily).
 
 Default checkpoint naming: `models/tft{target}{Hourly|Daily}Checkpoint.ckpt` (e.g., `models/tftspeedHourlyCheckpoint.ckpt`)
 Named-variant naming (via `--checkpoint-prefix`): `models/{prefix}{target}{Hourly|Daily}Checkpoint.ckpt`
@@ -110,9 +103,7 @@ The SQLite DB stores SWS columns under legacy names (`speed`, `gust`, `lull`, `d
 
 **Feature selection finding (earlier):** Atmospheric pressures alone (Comox, Lillooet, Pam Rocks, Vancouver, Victoria) outperformed configs adding EC temperature forecasts at the epoch counts tested. Currently under re-evaluation — the active `train_config.yaml` uses EC temperatures (DegC) as `real_unknown` for hourly, not pressures. Re-run `feature_selection.py --mode hourly` to compare.
 
-**`wind_hour`** — asymmetric cosine temporal feature: 0 outside 10am–6pm, rises to 1.0 at 1pm, falls back to 0 at 6pm. Computed in `build_dataset.py`, `update_data.py`, `evaluate.py`, and `horizon_eval.py`. Toggle via `real_known` in the YAML.
-
-**Known real features** (available in the forecast window): `wind_hour`, `sin_hour`, `year_fraction` (see YAML for which are active).
+**Known real features** (available in the forecast window): `year_fraction` (see YAML for which are active).
 **Unknown real features** (encoder past only): pressure kPa and/or station DegC columns — see `real_unknown` in `train_config.yaml` for current active set.
 
 **Quality scores:**
@@ -123,13 +114,33 @@ The SQLite DB stores SWS columns under legacy names (`speed`, `gust`, `lull`, `d
 
 **Key modules:**
 - `config.py` — `HourlyConfig` / `DailyConfig` dataclasses; populated from `train_config.yaml` via `from_yaml()`
-- `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist and omits empty feature lists (YAML parses `[]` as `None`); calm-period and time-of-day loss weighting applied here
+- `tft_common.py` — shared `train_model()`, `_build_dataset()`, `_apply_mask_intervals()`, and `tft_with_ignore`; `_build_dataset` validates all feature columns exist and omits empty feature lists (YAML parses `[]` as `None`)
 - `update_data.py` — `update_db()` pulls latest EC + SWS data into SQLite; `get_conditions_table_hourly/daily()` call it then build the inference DataFrame; applies `_DB_COL_RENAME` to map legacy DB column names to `squamish*`; runnable standalone for a DB-only update. Hourly path merges only DB history (no forecast scrape); daily path also merges `pull_forecast_daily()` for DegC real_known features.
 - `forecast.py` — `_warn_missing()` fires before each fill step and prints NaN counts + max consecutive gap per feature; "ALL values missing" indicates a scraper or DB failure.
 - `build_dataset.py` — builds training CSVs; also exports `add_scores_to_df()` used by `update_data.py` for daily inference
 - `ec_scrape.py` — all live EC scraping: `pull_past_hrs_weather()`, `pull_forecast_daily()`; also exports `normalize_sky_series()`. (`pull_forecast_hourly()` exists but is no longer called — hourly inference uses only DB encoder window data, not forecast DegC/Sky.)
 - `horizon_eval.py` — plots predicted vs actual at multiple horizons from the live DB; supports `--mode hourly` (1h/4h) and `--mode daily` (1d with Q25–Q75 band)
 - `sws_pull.py` — Selenium-based SWS wind data fetch; `get_sws_df(dates)` for arbitrary date lists; `update_sws_csv()` for incremental append since last CSV entry
+
+## Plain NN Baseline (simple_model.py)
+
+A same-timestep regression baseline — no encoder/decoder windows, no quantile loss — built to isolate whether the configured features explain `squamishSpeed` at all, independent of TFT's sequence-modeling machinery.
+
+```bash
+python simple_model.py --train                   # train + save models/simple_nn_hourly.pt
+python simple_model.py --test [--source db|csv]   # predict + plot; csv exposes Hum features the live DB lacks
+python simple_model.py                            # train then test
+```
+
+Reads the same `hourly:` `real_known` / `real_unknown` / `categorical` lists from `train_config.yaml` as the TFT pipeline (`categorical` columns are one-hot encoded against the fixed `Fair` / `Mostly Cloudy` / `Cloudy` / `Other` sky vocabulary). Two loss-weighting knobs live in `train_config.yaml`'s `hourly:` section, used ONLY by this script (not the TFT pipeline):
+- `spread_weight` — squared error on rows far from the training mean, in EITHER direction (peaks and troughs), scaled up to `(1+spread_weight)x`.
+- `strength_weight` — one-sided: weight ~0 for calm readings, ramping to 1.0 at the strongest reading, as `(actual/max)^strength_weight`. Takes priority over `spread_weight` if both are nonzero.
+
+`simple_feature_sweep.py` does greedy feature selection for this model: screens every station `DegC`/`KPa`/`Hum` column against a fixed base (read live from `train_config.yaml`'s `real_known`+`real_unknown`), then greedily adds up to `MAX_ADDITIONS` more, scored on a held-out split of the training CSV.
+
+**Findings from that sweep, worth knowing before trusting a feature:**
+- Humidity (`{station}Hum`) columns are consistently the strongest predictors found, but exist ONLY in the historical training CSVs — `ec_scrape.py`'s live scraper and the SQLite DB schema never capture humidity, so `--source db` can't use it. `--source csv` can, but that's exploration only; not deployable as-is without extending the live scraper + DB schema.
+- `{station}KPa` (pressure) columns are on inconsistent scales between the training CSV and the live DB: the bulk historical download reports genuine *station* pressure, while `ec_scrape.py`'s live scrape of `weather.gc.ca/past_conditions` reports *sea-level-adjusted* pressure. For Pemberton (~204m elevation) that's a systematic ~2.5 kPa offset — large enough to push a live inference input several standard deviations outside the training distribution and produce a visibly broken prediction. Treat `KPa` features as unsafe for live-served models until the two pipelines are reconciled to the same convention.
 
 ## Key Dependencies
 

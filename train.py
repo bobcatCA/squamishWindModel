@@ -25,10 +25,6 @@ def parse_args():
                    help='Train a subset of targets, e.g. --targets speed gust')
     p.add_argument('--no-lr-find', action='store_true',
                    help='Skip LR finder and use --lr or the config default')
-    p.add_argument('--weight-boost', type=float, dest='weight_boost',
-                   help='Up-weight target-hour samples by this factor (e.g. 3.0)')
-    p.add_argument('--calm-weight', type=float, dest='calm_weight',
-                   help='Loss multiplier for calm periods (0.0=ignore, 0.1=down-weight; default: 0.0)')
     p.add_argument('--checkpoint-prefix', dest='checkpoint_prefix',
                    help='Prefix for checkpoint and PKL filenames (default: "tft")')
     return p.parse_args()
@@ -52,10 +48,6 @@ if __name__ == '__main__':
         config.find_lr = False
     if args.no_lr_find:
         config.find_lr = False
-    if args.weight_boost is not None:
-        config.sample_weight_boost = args.weight_boost
-    if args.calm_weight is not None:
-        config.calm_weight_value = args.calm_weight
     if args.checkpoint_prefix is not None:
         config.checkpoint_prefix = args.checkpoint_prefix
 

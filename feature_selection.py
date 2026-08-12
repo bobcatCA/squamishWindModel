@@ -23,7 +23,7 @@ from tft_common import _apply_mask_intervals, _build_dataset, tft_with_ignore
 # Pressure NaN rates (after ffill): whistlerKPa 33.6%, pembertonKPa 19.6%,
 # pamKPa 11.3%, ballenasKPa 8.6%, lillooetKPa 4.0%.
 
-_TEMPORAL     = ['sin_hour', 'year_fraction']
+_TEMPORAL     = ['year_fraction']
 _PRESS_BASE   = ['comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa', 'victoriaKPa']
 _PRESS_NO_VIC = ['comoxKPa', 'lillooetKPa', 'pamKPa', 'vancouverKPa']
 

@@ -72,7 +72,6 @@ python train.py --mode daily                  # targets: speed, hours_above_20, 
 | `--lr F` | Override learning rate |
 | `--targets TARGET [...]` | Train only specific targets (e.g. `--targets speed gust`) |
 | `--no-lr-find` | Skip automatic learning rate finder |
-| `--weight-boost F` | Up-weight daytime prediction timesteps by this factor during training |
 | `--checkpoint-prefix PREFIX` | Save to named checkpoints (e.g. `tftExp`) instead of overwriting production checkpoints |
 
 Default checkpoint names: `tft{target}{Hourly\|Daily}Checkpoint.ckpt`
@@ -115,8 +114,6 @@ Output files: `hourly_speed_predictions.{csv,json}`, `daily_speed_predictions.{c
 
 ```bash
 python evaluate.py --start 2025-06-20        # evaluate against historical DB from this date
-python evaluate.py --compare                 # compare tftBase* vs tftWeighted* checkpoints
-python evaluate.py --compare --windows 100   # number of rolling windows for comparison
 ```
 
 ### Feature selection sweep
@@ -124,6 +121,16 @@ python evaluate.py --compare --windows 100   # number of rolling windows for com
 ```bash
 python feature_selection.py --mode hourly --epochs 2
 python feature_selection.py --mode daily  --epochs 3
+```
+
+### Plain NN baseline
+
+A simpler same-timestep regression model (no encoder/decoder, no quantile loss) for sanity-checking feature choices independent of the TFT pipeline. Reads the same `real_known`/`real_unknown`/`categorical` lists from `train_config.yaml`.
+
+```bash
+python simple_model.py --train                   # train + save models/simple_nn_hourly.pt
+python simple_model.py --test [--source db|csv]   # predict + plot (csv exposes Hum features the live DB doesn't have)
+python simple_feature_sweep.py                    # greedy feature selection against the current base features
 ```
 
 ---
@@ -135,7 +142,6 @@ All model hyperparameters and feature lists live in `train_config.yaml` — edit
 Key config sections:
 - Feature lists (`known_reals`, `unknown_reals`)
 - Sequence lengths (`encoder_length`, `prediction_length`)
-- `sample_weight_boost` / `weight_target_start_hour` / `weight_target_end_hour` — time-of-day loss weighting
 - `val_full_data` / `val_predict_mode` — validation dataset construction
 
 ---
