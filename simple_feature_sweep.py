@@ -20,7 +20,7 @@ import torch.nn as nn
 
 from config import HourlyConfig
 from simple_model import MLP
-from tft_common import _apply_mask_intervals
+from tft_model import _apply_mask_intervals
 
 STATIONS = ['vancouver', 'whistler', 'comox', 'victoria', 'pemberton', 'lillooet', 'pam', 'ballenas']
 SUFFIXES = ['DegC', 'KPa', 'Hum']

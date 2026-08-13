@@ -1,8 +1,6 @@
-"""Build hourly and daily training datasets from raw station CSVs and SWS wind data.
+"""Build the hourly training dataset from raw station CSVs and SWS wind data.
 
-    python build_dataset.py             # build both hourly and daily CSVs
-    python build_dataset.py --mode hourly
-    python build_dataset.py --mode daily  (reads hourly_database.csv)
+    python build_dataset.py
 
 Column naming convention
     squamishSpeed / squamishGust / squamishLull / squamishDirection / squamishDegC
@@ -11,7 +9,6 @@ Column naming convention
         — measurements from the corresponding EC weather station
 """
 
-import argparse
 import numpy as np
 import pandas as pd
 
@@ -145,9 +142,6 @@ def build_hourly(out_path: str = 'training_data/hourly_database.csv') -> pd.Data
     print(f'Dropped {before - len(df):,} of {before:,} rows (squamishSpeed missing or 0)')
     df[wind_cols] = df[wind_cols].fillna(0)
 
-    # Temporal features
-    df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-
     for col in df.columns:
         if col.endswith('Sky'):
             df[col] = normalize_sky_series(df[col])
@@ -159,85 +153,7 @@ def build_hourly(out_path: str = 'training_data/hourly_database.csv') -> pd.Data
     return df
 
 
-# ── Daily dataset (scoring) ───────────────────────────────────────────────────
-
-def _to_5_score(value: pd.Series, low: float, high: float) -> pd.Series:
-    """Linearly map *value* from [low, high] onto [1, 5], clipped."""
-    return np.clip(5 - 4 * (value - low) / (high - low), 1, 5)
-
-
-def add_scores_to_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute daily quality scores from hourly observations.
-
-    Adds direction_score, speed_score, hours_above_20. Returns one row per day
-    at 14:00 local time.
-    """
-    df = df.copy()
-    df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('America/Vancouver')
-    df['date'] = df['datetime'].dt.date
-
-    sailing = df[df['squamishSpeed'] > 15].copy()
-    sailing['gust_relative']   = sailing['squamishGust'] / sailing['squamishSpeed']
-    sailing['lull_relative']   = sailing['squamishLull'] / sailing['squamishSpeed']
-    sailing['gust_lull_index'] = (sailing['gust_relative'] - 1) + (1 - sailing['lull_relative'])
-
-    dir_stdev = (
-        sailing.groupby('date')['squamishDirection']
-        .std()
-        .reset_index(name='dir_stdev')
-    )
-    dir_stdev['direction_score'] = _to_5_score(dir_stdev['dir_stdev'], low=0.8, high=18)
-
-    speed_score = (
-        sailing.groupby('date')['gust_lull_index']
-        .mean()
-        .apply(_to_5_score, low=0.15, high=0.75)
-        .reset_index(name='speed_score')
-    )
-
-    hours_above_20 = (
-        df.assign(above_20=df['squamishSpeed'] > 20)
-        .groupby('date', as_index=False)
-        .agg(hours_above_20=('above_20', 'sum'))
-    )
-    hours_above_20['hours_above_20'] -= 1
-
-    daily = pd.DataFrame({'date': df['date'].unique()})
-    daily = (daily
-             .merge(dir_stdev[['date', 'direction_score']], on='date', how='left')
-             .merge(speed_score, on='date', how='left')
-             .merge(hours_above_20, on='date', how='left'))
-
-    daily['date'] = (
-        pd.to_datetime(daily['date']) + pd.to_timedelta(14, 'hours')
-    ).dt.tz_localize('America/Vancouver')
-    daily = daily.rename(columns={'date': 'datetime'})
-
-    result = daily.merge(df, on='datetime', how='left')
-    result.drop(columns='dir_stdev', inplace=True, errors='ignore')
-    result.fillna({'direction_score': 0, 'speed_score': 0}, inplace=True)
-    result.sort_values('datetime', inplace=True)
-    return result
-
-
-def build_daily(hourly_path: str = 'training_data/hourly_database.csv',
-                out_path: str = 'training_data/daily_database.csv') -> pd.DataFrame:
-    data = pd.read_csv(hourly_path)
-    data = add_scores_to_df(data)
-    data.to_csv(out_path, index=False)
-    print(f'Saved {out_path}  {len(data):,} rows')
-    return data
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(description='Build TFT training datasets')
-    p.add_argument('--mode', choices=['hourly', 'daily', 'both'], default='both',
-                   help='Which dataset to build (default: both)')
-    args = p.parse_args()
-
-    if args.mode in ('hourly', 'both'):
-        build_hourly()
-    if args.mode in ('daily', 'both'):
-        build_daily()
+    build_hourly()

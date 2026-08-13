@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from config import HourlyConfig
 from ec_scrape import normalize_sky_series
-from tft_common import _apply_mask_intervals
+from tft_model import _apply_mask_intervals
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
@@ -69,11 +69,6 @@ def _one_hot_categorical(df: pd.DataFrame, categorical: list[str]) -> pd.DataFra
         for col in categorical for cat in SKY_CATEGORIES
     }
     return pd.DataFrame(parts, index=df.index)
-
-
-def _add_time_features(df: pd.DataFrame) -> pd.DataFrame:
-    df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-    return df
 
 
 def _spread_weighted_mse(pred: torch.Tensor, actual: torch.Tensor, spread_weight: float) -> torch.Tensor:
@@ -213,8 +208,7 @@ def _load_test_df_db(start_ts: pd.Timestamp) -> pd.DataFrame:
             'SELECT * FROM weather WHERE datetime > ?', conn, params=(start_ts.timestamp(),),
         )
     df['datetime'] = pd.to_datetime(df['datetime'], unit='s', utc=True).dt.tz_convert('America/Vancouver')
-    df = df.sort_values('datetime').reset_index(drop=True)
-    return _add_time_features(df)
+    return df.sort_values('datetime').reset_index(drop=True)
 
 
 def _load_test_df_csv(start_ts: pd.Timestamp) -> pd.DataFrame:
@@ -225,9 +219,7 @@ def _load_test_df_csv(start_ts: pd.Timestamp) -> pd.DataFrame:
     cfg = HourlyConfig.from_yaml()
     df = pd.read_csv(cfg.data_path)
     df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('America/Vancouver')
-    df = df[df['datetime'] > start_ts].sort_values('datetime').reset_index(drop=True)
-    df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
-    return df
+    return df[df['datetime'] > start_ts].sort_values('datetime').reset_index(drop=True)
 
 
 def test(start: str = None, save: bool = False, source: str = 'db') -> None:

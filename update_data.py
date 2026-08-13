@@ -14,12 +14,8 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 
-from build_dataset import add_scores_to_df, wind_to_hourly_index
-from ec_scrape import (
-    normalize_sky_series,
-    pull_forecast_daily,
-    pull_past_hrs_weather,
-)
+from build_dataset import wind_to_hourly_index
+from ec_scrape import pull_past_hrs_weather
 from sws_pull import get_sws_df
 
 load_dotenv()
@@ -36,13 +32,6 @@ _DB_COL_RENAME = {
     'direction':   'squamishDirection',
     'temperature': 'squamishDegC',
 }
-
-
-def _normalize_sky_cols(df: pd.DataFrame) -> pd.DataFrame:
-    sky_cols = df.columns[df.columns.str.contains('Sky')]
-    for col in sky_cols:
-        df[col] = normalize_sky_series(df[col])
-    return df
 
 
 def _insert_rows(df: pd.DataFrame) -> None:
@@ -98,37 +87,6 @@ def update_db() -> None:
     _insert_rows(df_recent)
 
 
-def get_conditions_table_daily(encoder_length: int = 8, prediction_length: int = 5,
-                                update: bool = True) -> pd.DataFrame:
-    if update:
-        update_db()
-    today_14 = pd.Timestamp.now(tz='America/Vancouver').normalize() + pd.Timedelta(hours=14)
-    start = today_14 - timedelta(days=encoder_length)
-    end   = today_14 + timedelta(days=prediction_length - 1)
-    time_index = pd.date_range(start=start, end=end, freq='d')
-
-    with sqlite3.connect(_db_path()) as conn:
-        df_hist = pd.read_sql_query(
-            'SELECT * FROM weather WHERE datetime > ?',
-            conn, params=(start.timestamp(),),
-        )
-    df_hist['datetime'] = (
-        pd.to_datetime(df_hist['datetime'], unit='s', utc=True)
-        .dt.tz_convert('America/Vancouver')
-    )
-
-    df_scored   = add_scores_to_df(df_hist)
-    df_forecast = pull_forecast_daily(time_index)
-    df_out = pd.concat([df_scored, df_forecast], ignore_index=True)
-
-    df_out['year_fraction'] = (df_out['datetime'].dt.month * 30.416 + df_out['datetime'].dt.day) / 365
-    df_out = _normalize_sky_cols(df_out)
-    df_out.sort_values('datetime', inplace=True)
-    df_out.dropna(thresh=5, inplace=True)
-    df_out.reset_index(drop=True, inplace=True)
-    return df_out
-
-
 def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int = 8,
                                  specified_start: pd.Timestamp = None,
                                  update: bool = True) -> pd.DataFrame:
@@ -154,8 +112,6 @@ def get_conditions_table_hourly(encoder_length: int = 12, prediction_length: int
 
     df = pd.DataFrame({'datetime': time_index})
     df = df.merge(df_hist, on='datetime', how='left')
-
-    df['year_fraction'] = (df['datetime'].dt.month * 30.416 + df['datetime'].dt.day) / 365
 
     num_cols = df.select_dtypes(include='number').columns
     df[num_cols] = df[num_cols].interpolate(limit=1)

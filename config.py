@@ -14,7 +14,7 @@ def _load_section(section: str, yaml_path: Path = CONFIG_YAML) -> dict:
 
 @dataclass
 class _BaseConfig:
-    """Shared hyperparameters for hourly and daily TFT configs.
+    """Shared hyperparameters for the hourly TFT config.
 
     Feature lists (targets, real_known, real_unknown, categorical) and all
     sequence/training parameters are loaded from train_config.yaml by
@@ -53,10 +53,6 @@ class _BaseConfig:
 
     val_full_data: bool = False
     val_predict_mode: bool = False
-
-    # Checkpoint/PKL filename prefix — override via --checkpoint-prefix in train.py
-    # to save named variants without disturbing the production checkpoints.
-    checkpoint_prefix: str = 'tft'
 
     # Symmetric peak/trough loss weighting for simple_model.py's plain NN
     # ONLY (not read by the TFT pipeline). Squared error on rows far from the
@@ -112,34 +108,3 @@ class HourlyConfig(_BaseConfig):
 
     def training_cutoff(self, max_idx: int) -> int:
         return max_idx - 2 * (self.encoder_length + self.prediction_length)
-
-
-@dataclass
-class DailyConfig(_BaseConfig):
-    data_path: str = 'training_data/daily_database.csv'
-    checkpoint_suffix: str = 'Daily'
-
-    encoder_length: int = 5
-    prediction_length: int = 5
-    min_encoder_length: int = 2
-    min_prediction_length: int = 1
-
-    dropout: float = 0.2
-    hidden_continuous_size: int = 4
-
-    max_epochs: int = 8
-    batch_size: int = 1024
-    gradient_clip_val: float = 0.2
-    optimizer: Optional[str] = None  # TFT default
-    find_lr: bool = False
-    learning_rate: float = 8e-4
-
-    val_full_data: bool = True
-    val_predict_mode: bool = True
-
-    @classmethod
-    def from_yaml(cls, yaml_path: Path = CONFIG_YAML) -> 'DailyConfig':
-        return cls._from_yaml('daily', yaml_path)
-
-    def training_cutoff(self, max_idx: int) -> int:
-        return max_idx - self.prediction_length
