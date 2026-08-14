@@ -1,37 +1,45 @@
-"""Feature selection for the plain-vanilla nowcast NN (simple_model.py).
+"""Feature selection for the plain-vanilla nowcast NNs (simple_model.py,
+simple_daily_model.py).
 
-Base features = whatever's currently active in train_config.yaml's hourly
-real_known + real_unknown (read fresh each run, so this always tracks your
-current config). Every other station DegC/KPa/Hum column (plus squamishDegC)
-is a candidate to add ON TOP of that fixed base — screened one at a time,
-then greedily combined up to MAX_ADDITIONS extra features.
+    python simple_feature_sweep.py                  # hourly (default)
+    python simple_feature_sweep.py --mode daily
+    python simple_feature_sweep.py --mode daily --max-additions 10
+
+Base features = whatever's currently active in train_config.yaml's
+{mode}: real_known + real_unknown (read fresh each run, so this always
+tracks your current config — empty base is fine, e.g. daily starts from
+nothing). Every other station DegC/KPa/Hum column (plus squamishDegC) is a
+candidate to add ON TOP of that fixed base — screened one at a time, then
+greedily combined up to --max-additions extra features (default: 2 for
+hourly, since it already has an established base to extend; effectively
+unbounded for daily, to search out a starting set from scratch).
 
 Methodology: all candidate columns are forward/back-filled once up front so
 every combination is compared on the exact same rows and train/val split —
 otherwise per-combo dropna would let sparser combos silently train (and get
 scored) on a different, easier subset.
-
-    python simple_feature_sweep.py
 """
+
+import argparse
 
 import pandas as pd
 import torch
 import torch.nn as nn
 
-from config import HourlyConfig
+from config import DailyConfig, HourlyConfig
 from simple_model import MLP
 from tft_model import _apply_mask_intervals
 
 STATIONS = ['vancouver', 'whistler', 'comox', 'victoria', 'pemberton', 'lillooet', 'pam', 'ballenas']
 SUFFIXES = ['DegC', 'KPa', 'Hum']
-MAX_ADDITIONS = 2
+DEFAULT_MAX_ADDITIONS = {'hourly': 2, 'daily': 99}
 SCREEN_EPOCHS = 150
 FINAL_EPOCHS = 300
 SEEDS = (0, 1, 2)
 
 
-def _load_data_and_base():
-    cfg = HourlyConfig.from_yaml()
+def _load_data_and_base(mode: str):
+    cfg = (HourlyConfig if mode == 'hourly' else DailyConfig).from_yaml()
     target = cfg.targets[0]
     base_features = list(dict.fromkeys(list(cfg.real_known or []) + list(cfg.real_unknown or [])))
     data = pd.read_csv(cfg.data_path)
@@ -88,9 +96,9 @@ def _fit_eval(data: pd.DataFrame, target: str, features: list[str],
     return sum(rmses) / len(rmses), len(d)
 
 
-def main():
-    data, target, base_features = _load_data_and_base()
-    print(f'Base features (from train_config.yaml real_known+real_unknown): {base_features}')
+def main(mode: str, max_additions: int) -> None:
+    data, target, base_features = _load_data_and_base(mode)
+    print(f'[{mode}] Base features (from train_config.yaml real_known+real_unknown): {base_features}')
 
     print('\nCandidate coverage (post mask_intervals, pre-fill):')
     candidates, all_cols = _candidates(data, base_features)
@@ -111,12 +119,12 @@ def main():
     for feat, rmse, delta in uni_results:
         print(f'  {feat:16s} val RMSE={rmse:.3f}  delta={delta:+.3f}')
 
-    print(f'\n-- Greedy addition (up to {MAX_ADDITIONS} extra features) --')
+    print(f'\n-- Greedy addition (up to {max_additions} extra features) --')
     selected = list(base_features)
     added = []
     remaining = [f for f, _, _ in uni_results]
     best_rmse = base_rmse
-    while remaining and len(added) < MAX_ADDITIONS:
+    while remaining and len(added) < max_additions:
         scored = [(feat, _fit_eval(data, target, selected + [feat], SCREEN_EPOCHS, seeds=SEEDS)[0])
                    for feat in remaining]
         scored.sort(key=lambda x: x[1])
@@ -140,4 +148,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    p = argparse.ArgumentParser(description='Greedy feature selection for simple_model.py / simple_daily_model.py')
+    p.add_argument('--mode', choices=['hourly', 'daily'], default='hourly')
+    p.add_argument('--max-additions', type=int, default=None, dest='max_additions',
+                   help='Cap on greedily-added features (default: 2 for hourly, 99 for daily)')
+    args = p.parse_args()
+    main(args.mode, args.max_additions or DEFAULT_MAX_ADDITIONS[args.mode])

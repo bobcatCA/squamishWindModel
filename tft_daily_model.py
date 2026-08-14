@@ -1,13 +1,30 @@
-"""TFT model for squamishSpeed — hourly multi-horizon forecast.
+"""TFT model for daily targets (2pm snapshot) — multi-day forecast.
 
-A from-scratch rebuild of the TFT pipeline, mirroring simple_model.py's
-shape: one file, train()/test() functions, the same --train/--test/
---source db|csv CLI. Reads the same real_known/real_unknown/categorical
-feature configuration from train_config.yaml's hourly section.
+One model per target, all sharing this same blueprint: the daily: section's
+real_known/real_unknown/hyperparameters from train_config.yaml (DegC columns
+are real_known because EC's 6-day daily forecast — pull_forecast_daily() in
+ec_scrape.py — actually covers them; KPa/Hum/squamishDegC are real_unknown
+since EC doesn't forecast pressure or humidity, and squamishDegC is the local
+sensor, never forecastable). Reuses tft_with_ignore/_build_dataset/
+_apply_mask_intervals from tft_model.py rather than duplicating them.
 
-    python tft_model.py --train                   # train + save models/tft{target}HourlyCheckpoint.ckpt
-    python tft_model.py --test [--source db|csv]   # predict + plot; csv exposes Hum features the live DB lacks
-    python tft_model.py                            # train then test
+Available targets are train_config.yaml's daily: targets list — currently
+squamishSpeed (the raw 2pm speed) and speed_steadiness/direction_steadiness
+(the 0-5 scores from build_dataset.py's add_speed_steadiness()/
+add_direction_steadiness()). --target selects which one; defaults to the
+first entry (squamishSpeed). The steadiness scores only exist in the
+daily-built CSV, not the live DB, so use --source csv for those.
+
+    python tft_daily_model.py --train [--target NAME]                      # train + save models/tft{target}DailyCheckpoint.ckpt
+    python tft_daily_model.py --test [--target NAME] [--source db|csv]     # predict + plot
+    python tft_daily_model.py [--target NAME]                              # train then test
+
+CAVEAT: --test currently feeds the real_known window from OBSERVED station
+temperatures (DB or CSV), not genuine EC forecast values — pull_forecast_daily()
+isn't wired into either test path yet, so this is a "perfect foresight"
+backtest, not a true live-inference test. Wiring in real forecast temps for
+actual daily forecast generation is a follow-up (see forecast.py, which
+doesn't have a daily path either right now).
 """
 
 import argparse
@@ -21,86 +38,38 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.serialization
-import yaml
 from dotenv import load_dotenv
 from lightning.pytorch import Trainer
 from lightning.pytorch.tuner import Tuner
 from pytorch_forecasting import QuantileLoss, RMSE, TemporalFusionTransformer, TimeSeriesDataSet
-from pytorch_forecasting.data import GroupNormalizer
 
-from config import CONFIG_YAML, HourlyConfig
+from config import DailyConfig
 from ec_scrape import normalize_sky_series
+from tft_model import _apply_mask_intervals, _build_dataset, tft_with_ignore
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
 DB_PATH    = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
+DAILY_HOUR = 14  # matches build_dataset.py's DAILY_HOUR
+
+# Targets that only exist in the daily-built CSV (steadiness scores are
+# computed by build_dataset.py, never written to the live SQLite DB).
+CSV_ONLY_TARGETS = {'speed_steadiness', 'direction_steadiness'}
 
 
-class tft_with_ignore(TemporalFusionTransformer):
-    """TFT subclass that skips serialising loss and logging_metrics into hparams.
-
-    Without this, loading a checkpoint with a custom loss object fails.
-    """
-
-    def __init__(self, *args, loss=None, logging_metrics=None, **kwargs):
-        self.save_hyperparameters(ignore=['loss', 'logging_metrics'])
-        super().__init__(*args, loss=loss, logging_metrics=logging_metrics, **kwargs)
+def _resolve_target(cfg: DailyConfig, target: str = None) -> str:
+    if target is None:
+        return cfg.targets[0]
+    if target not in cfg.targets:
+        raise SystemExit(f'--target {target!r} not in train_config.yaml daily: targets={cfg.targets}')
+    return target
 
 
-def _apply_mask_intervals(data: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows whose date falls within any mask_interval in train_config.yaml."""
-    with open(CONFIG_YAML) as f:
-        intervals = yaml.safe_load(f).get('data', {}).get('mask_intervals', [])
-    for iv in intervals:
-        start = pd.Timestamp(iv['start']).date()
-        end = pd.Timestamp(iv['end']).date()
-        mask = (data['datetime'].dt.date >= start) & (data['datetime'].dt.date <= end)
-        n = int(mask.sum())
-        data = data[~mask].reset_index(drop=True)
-        print(f'  Masked {n:,} rows  ({iv["start"]} → {iv["end"]})')
-    return data
-
-
-def _build_dataset(data: pd.DataFrame, target: str, cfg: HourlyConfig, cutoff: int) -> TimeSeriesDataSet:
-    required = set((cfg.real_known or []) + (cfg.real_unknown or []) + (cfg.categorical or []) + [target])
-    missing = sorted(required - set(data.columns))
-    if missing:
-        raise ValueError(f'Feature columns missing from data: {missing}')
-
-    kwargs = dict(
-        time_idx='time_idx',
-        target=target,
-        group_ids=['static'],
-        static_categoricals=['static'],
-        time_varying_unknown_reals=[target] + (cfg.real_unknown or []),
-        min_encoder_length=cfg.min_encoder_length,
-        max_encoder_length=cfg.encoder_length,
-        min_prediction_length=cfg.min_prediction_length,
-        max_prediction_length=cfg.prediction_length,
-        target_normalizer=GroupNormalizer(groups=['static']),
-        add_relative_time_idx=True,
-        add_target_scales=True,
-        randomize_length=None,
-    )
-    if cfg.categorical:
-        kwargs['time_varying_known_categoricals'] = cfg.categorical
-    if cfg.real_known:
-        kwargs['time_varying_known_reals'] = cfg.real_known
-    if cfg.allow_missing_timesteps:
-        kwargs['allow_missing_timesteps'] = True
-    if 'weight' in data.columns:
-        # Opt-in only — inert unless a caller adds a 'weight' column itself
-        # (e.g. tft_daily_weight_sweep.py's calm-day deweighting trials).
-        # Neither hourly's nor daily's own train() do this by default.
-        kwargs['weight'] = 'weight'
-    return TimeSeriesDataSet(data[data.time_idx <= cutoff], **kwargs)
-
-
-def train(epochs: int = None) -> None:
-    cfg = HourlyConfig.from_yaml()
+def train(epochs: int = None, target: str = None) -> None:
+    cfg = DailyConfig.from_yaml()
     if epochs is not None:
         cfg.max_epochs = epochs
-    target = cfg.targets[0]
+    target = _resolve_target(cfg, target)
 
     data = pd.read_csv(cfg.data_path)
     data.dropna(thresh=14, inplace=True)
@@ -118,19 +87,21 @@ def train(epochs: int = None) -> None:
 
     cutoff = cfg.training_cutoff(data['time_idx'].max())
 
-    print(f'Training {target} (Hourly)')
+    print(f'Training {target} (Daily)')
     print(f'real_known={cfg.real_known}  real_unknown={cfg.real_unknown}  categorical={cfg.categorical}')
 
     training = _build_dataset(data, target, cfg, cutoff)
-    training.save(f'models/{target}_training_dataset_hourly.pkl')
+    training.save(f'models/{target}_training_dataset_daily.pkl')
 
     val_data = data if cfg.val_full_data else data[data.time_idx > cutoff]
     validation = TimeSeriesDataSet.from_dataset(
         training, val_data, predict=cfg.val_predict_mode, stop_randomization=True,
     )
 
-    train_dl = training.to_dataloader(train=True, batch_size=cfg.batch_size, num_workers=4)
-    val_dl = validation.to_dataloader(train=False, batch_size=cfg.batch_size, num_workers=4)
+    # num_workers=0: ~600 rows already in memory, so spawning worker subprocesses is pure
+    # multiprocessing overhead here, not a speedup (unlike hourly's much larger dataset).
+    train_dl = training.to_dataloader(train=True, batch_size=cfg.batch_size, num_workers=0)
+    val_dl = validation.to_dataloader(train=False, batch_size=cfg.batch_size, num_workers=0)
 
     pl.seed_everything(42)
 
@@ -181,14 +152,14 @@ def train(epochs: int = None) -> None:
     trainer = Trainer(accelerator=cfg.accelerator, max_epochs=cfg.max_epochs, gradient_clip_val=cfg.gradient_clip_val)
     trainer.fit(tft, train_dl, val_dl)
 
-    ckpt_path = f'models/tft{target}HourlyCheckpoint.ckpt'
+    ckpt_path = f'models/tft{target}DailyCheckpoint.ckpt'
     trainer.save_checkpoint(ckpt_path)
     print(f'Saved {ckpt_path}')
 
 
 def _load_model_and_dataset(target: str):
-    ckpt = WORKING_DIR / 'models' / f'tft{target}HourlyCheckpoint.ckpt'
-    pkl  = WORKING_DIR / 'models' / f'{target}_training_dataset_hourly.pkl'
+    ckpt = WORKING_DIR / 'models' / f'tft{target}DailyCheckpoint.ckpt'
+    pkl  = WORKING_DIR / 'models' / f'{target}_training_dataset_daily.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
         training_dataset = torch.load(pkl, weights_only=False)
     model = tft_with_ignore.load_from_checkpoint(ckpt)
@@ -196,28 +167,23 @@ def _load_model_and_dataset(target: str):
     return model, training_dataset
 
 
-def _load_test_df(cfg: HourlyConfig, start_ts: pd.Timestamp, source: str,
+def _load_test_df(cfg: DailyConfig, start_ts: pd.Timestamp, source: str,
                    end_ts: pd.Timestamp = None) -> pd.DataFrame:
     if source == 'csv':
         df = pd.read_csv(cfg.data_path)
         df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('America/Vancouver')
         df = df[df['datetime'] > start_ts]
-        if end_ts is not None:
-            df = df[df['datetime'] <= end_ts]
-        df = df.sort_values('datetime').reset_index(drop=True)
     else:
         with sqlite3.connect(DB_PATH) as conn:
-            if end_ts is not None:
-                df = pd.read_sql_query(
-                    'SELECT * FROM weather WHERE datetime > ? AND datetime <= ?',
-                    conn, params=(start_ts.timestamp(), end_ts.timestamp()),
-                )
-            else:
-                df = pd.read_sql_query(
-                    'SELECT * FROM weather WHERE datetime > ?', conn, params=(start_ts.timestamp(),),
-                )
+            df = pd.read_sql_query(
+                'SELECT * FROM weather WHERE datetime > ?', conn, params=(start_ts.timestamp(),),
+            )
         df['datetime'] = pd.to_datetime(df['datetime'], unit='s', utc=True).dt.tz_convert('America/Vancouver')
-        df = df.sort_values('datetime').reset_index(drop=True)
+        df = df[df['datetime'].dt.hour == DAILY_HOUR]
+
+    if end_ts is not None:
+        df = df[df['datetime'] <= end_ts]
+    df = df.sort_values('datetime').reset_index(drop=True)
 
     for col in (cfg.categorical or []):
         if col in df.columns:
@@ -229,16 +195,11 @@ def _load_test_df(cfg: HourlyConfig, start_ts: pd.Timestamp, source: str,
     return df
 
 
-def test(start: str = None, end: str = None, save: bool = False, source: str = 'db') -> None:
-    cfg = HourlyConfig.from_yaml()
-    target = cfg.targets[0]
+def _predict(cfg: DailyConfig, target: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp, source: str):
+    """Run the sliding-window backtest for one target. Returns (df, merged, mae, rmse)
+    or (df, None, None, None) if no predictions were produced."""
     model, training_dataset = _load_model_and_dataset(target)
 
-    start_ts = (
-        pd.Timestamp(start, tz='America/Vancouver') if start
-        else pd.Timestamp('2000-01-01', tz='America/Vancouver')
-    )
-    end_ts = pd.Timestamp(end, tz='America/Vancouver') if end else None
     df = _load_test_df(cfg, start_ts, source, end_ts)
     df[target] = df[target].fillna(0)
     df = df.dropna(subset=(cfg.real_known or []) + (cfg.real_unknown or []) + [target]).reset_index(drop=True)
@@ -276,39 +237,73 @@ def test(start: str = None, end: str = None, save: bool = False, source: str = '
         except Exception:
             pass
         if (w + 1) % 10 == 0 or (w + 1) == n_windows:
-            print(f'  {w + 1}/{n_windows}', end='\r', flush=True)
+            print(f'  {target}: {w + 1}/{n_windows}', end='\r', flush=True)
     print()
 
     preds = pd.DataFrame(records).drop_duplicates(subset='datetime').sort_values('datetime')
     merged = df[['datetime', target]].merge(preds, on='datetime', how='inner')
     if merged.empty:
-        print('No predictions produced — check that the model/dataset match the current feature config.')
-        return
+        return df, None, None, None
 
     actual = merged[target].values
     pred = merged['pred'].values
     mae = np.mean(np.abs(pred - actual))
     rmse = np.sqrt(np.mean((pred - actual) ** 2))
-    print(f'source={source}  {len(merged):,} predicted rows from {merged["datetime"].min()} → {merged["datetime"].max()}')
-    print(f'MAE={mae:.2f}  RMSE={rmse:.2f}  (actual mean={actual.mean():.2f}, max={actual.max():.2f})')
+    return df, merged, mae, rmse
 
+
+def _plot_target(ax, target: str, df: pd.DataFrame, merged: pd.DataFrame, source: str) -> None:
     q = QuantileLoss().quantiles
     med_idx = len(q) // 2
     lo_q, hi_q = q[med_idx - 1], q[med_idx + 1]
 
-    fig, ax = plt.subplots(figsize=(16, 5))
-    ax.plot(df['datetime'], df[target], color='#333333', linewidth=0.8, alpha=0.5, label='actual')
+    ax.plot(df['datetime'], df[target], color='#333333', linewidth=0.8, alpha=0.5, marker='o', markersize=3, label='actual')
     ax.fill_between(merged['datetime'], merged['pred_lo'], merged['pred_hi'],
                      color='#1f77b4', alpha=0.15, label=f'Q{lo_q:.2f}–Q{hi_q:.2f}')
-    ax.plot(merged['datetime'], merged['pred'], color='#1f77b4', linewidth=1.1, alpha=0.9, label='predicted (median)')
+    ax.plot(merged['datetime'], merged['pred'], color='#1f77b4', linewidth=1.1, alpha=0.9, marker='o', markersize=3, label='predicted (median)')
     ax.set_ylabel(target)
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.2)
-    ax.set_title(f'TFT — predicted vs actual {target}  [source={source}]')
-    plt.tight_layout()
+    ax.set_title(f'TFT — predicted vs actual {target} (daily, 2pm)  [source={source}]')
 
+
+def test(start: str = None, end: str = None, save: bool = False, source: str = 'db', target: str = None) -> None:
+    cfg = DailyConfig.from_yaml()
+
+    targets = cfg.targets if target == 'all' else [_resolve_target(cfg, target)]
+    for t in targets:
+        if t in CSV_ONLY_TARGETS and source == 'db':
+            raise SystemExit(f'{t} only exists in the daily-built CSV, not the live DB — use --source csv')
+
+    start_ts = (
+        pd.Timestamp(start, tz='America/Vancouver') if start
+        else pd.Timestamp('2000-01-01', tz='America/Vancouver')
+    )
+    end_ts = pd.Timestamp(end, tz='America/Vancouver') if end else None
+
+    fig, axes = plt.subplots(len(targets), 1, figsize=(16, 5 * len(targets)), squeeze=False)
+    axes = axes[:, 0]
+    any_plotted = False
+
+    for ax, t in zip(axes, targets):
+        df, merged, mae, rmse = _predict(cfg, t, start_ts, end_ts, source)
+        if merged is None:
+            print(f'{t}: no predictions produced — check that the model/dataset match the current feature config.')
+            continue
+        actual = merged[t].values
+        print(f'{t}: source={source}  {len(merged):,} predicted rows from {merged["datetime"].min()} → {merged["datetime"].max()}')
+        print(f'{t}: MAE={mae:.2f}  RMSE={rmse:.2f}  (actual mean={actual.mean():.2f}, max={actual.max():.2f})')
+        _plot_target(ax, t, df, merged, source)
+        any_plotted = True
+
+    if not any_plotted:
+        plt.close(fig)
+        return
+
+    plt.tight_layout()
     if save:
-        out = WORKING_DIR / 'forecasts' / f'tft_test_{source}.png'
+        suffix = 'all' if target == 'all' else targets[0]
+        out = WORKING_DIR / 'forecasts' / f'tft_daily_test_{suffix}_{source}.png'
         fig.savefig(out, dpi=150, bbox_inches='tight')
         print(f'Saved {out}')
     else:
@@ -316,23 +311,28 @@ def test(start: str = None, end: str = None, save: bool = False, source: str = '
 
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(description='TFT model for squamishSpeed (hourly)')
+    p = argparse.ArgumentParser(description='TFT model for squamishSpeed (daily)')
     p.add_argument('--train', action='store_true', help='Train and save the model')
     p.add_argument('--test',  action='store_true', help='Predict against DB or CSV and plot')
     p.add_argument('--epochs', type=int, default=None, help='Override max_epochs from train_config.yaml')
+    p.add_argument('--target', default=None,
+                   help="Which daily: targets entry to train/test (default: first entry, squamishSpeed). "
+                        "--test --target all plots every target in one stacked figure.")
     p.add_argument('--start', help='Test start date YYYY-MM-DD (default: all available data)')
-    p.add_argument('--end', help='Test end date YYYY-MM-DD, inclusive (default: no upper bound) — '
-                                  'use with --start to bound a small window for fast iteration')
+    p.add_argument('--end', help='Test end date YYYY-MM-DD, inclusive (default: no upper bound)')
     p.add_argument('--source', choices=['db', 'csv'], default='db',
-                   help='Where --test pulls data from: live SQLite DB (default), or the full '
-                        'training CSV — use csv for features not in the live DB')
+                   help="Where --test pulls data from: live SQLite DB filtered to each day's 2pm "
+                        'row (default), or the full daily-built CSV — required for CSV-only targets')
     p.add_argument('--save', action='store_true', help='Save plot to forecasts/ instead of showing it')
     args = p.parse_args()
 
     run_train = args.train or not (args.train or args.test)
     run_test  = args.test or not (args.train or args.test)
 
+    if run_train and args.target == 'all':
+        raise SystemExit('--target all trains one model at a time — pass an explicit target, or omit --target')
+
     if run_train:
-        train(epochs=args.epochs)
+        train(epochs=args.epochs, target=args.target)
     if run_test:
-        test(start=args.start, end=args.end, save=args.save, source=args.source)
+        test(start=args.start, end=args.end, save=args.save, source=args.source, target=args.target)

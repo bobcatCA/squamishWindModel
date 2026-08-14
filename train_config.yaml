@@ -125,3 +125,95 @@ hourly:
   # (actual/max)^strength_weight. Takes priority over spread_weight if both
   # are nonzero. 0.0 = off. Override per-run with --strength-weight.
   strength_weight: 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+daily:
+  data_path: training_data/daily_database.csv
+
+  # Sequence lengths
+  encoder_length: 5         # days of history to feed in
+  prediction_length: 5      # days ahead to forecast
+  min_encoder_length: 2     # shortest encoder window allowed during training
+  min_prediction_length: 1
+
+  # Daily targets tft_daily_model.py can train/test against (one model per
+  # target, selected with --target; defaults to the first entry). All share
+  # this same section's real_known/real_unknown/hyperparameters — same
+  # blueprint, different label column. squamishSpeed is the 2pm speed
+  # snapshot; speed_steadiness/direction_steadiness are the 0-5 scores from
+  # build_dataset.py's add_speed_steadiness()/add_direction_steadiness() —
+  # both CSV-only (not in the live DB), so --test needs --source csv for them.
+  targets:
+    - squamishSpeed
+    - speed_steadiness
+    - direction_steadiness
+
+  # Features known for the full forecast window — EC's 6-day daily forecast
+  # covers temperature only (pull_forecast_daily() in ec_scrape.py), so DegC
+  # is the only station variable that legitimately belongs here.
+  #
+  # tft_daily_sweep.py found this exact 4-feature set beats every single
+  # addition tried (21 candidates: the other 4 DegC stations, all 8 KPa,
+  # all 8 Hum, squamishDegC) — adding a 5th temperature was worst of all,
+  # echoing the same finding already noted for hourly above. See that
+  # script's docstring/output for the full ranking.
+  real_known:
+    #- ballenasDegC
+    - comoxDegC
+    - lillooetDegC
+    - pamDegC
+    - pembertonDegC
+    - vancouverDegC
+    - whistlerDegC
+    #- victoriaDegC
+
+  # Features only available in the past (measured, not forecast) — EC does
+  # not forecast pressure or humidity, and squamishDegC is the local sensor
+  # (never forecastable, encoder-only). Left empty per the sweep above —
+  # every KPa/Hum/squamishDegC candidate hurt too.
+  real_unknown:
+    #- ballenasKPa
+    - comoxHum
+    - comoxKPa
+    - lillooetKPa
+    #- pamHum
+    - pamKPa
+    - pembertonKPa
+    - squamishDegC
+    #- squamishDirection
+    - vancouverHum
+    - vancouverKPa
+    - whistlerKPa
+
+  # Categorical features (must be strings in the CSV)
+  categorical:
+
+  # Model architecture — deliberately smaller than hourly's (64/4/32): daily
+  # has ~14x less data (~746 rows post-mask vs ~10,314), so hourly's capacity
+  # risks overfitting here. hidden_continuous_size=4 matches what the
+  # pre-rebuild DailyConfig used for the same reason.
+  hidden_size: 16
+  attention_head_size: 2
+  dropout: 0.2
+  hidden_continuous_size: 4
+  output_size: 7            # quantile outputs: Q10 Q20 Q30 Q40 Q50 Q60 Q70 Q80 Q90
+
+  # Training
+  max_epochs: 40             # small dataset — the feature sweep's 15-epoch screening runs
+                              # already gave a clean, consistent signal
+  batch_size: 32            # ~600 training rows -> batch_size=128 was only ~5 batches/epoch
+  gradient_clip_val: 0.1
+  accelerator: cpu
+  optimizer: ~              # null = use TFT default optimiser
+  find_lr: false             # skips the LR range-test's own mini training loop — use the
+                              # value it already found for this architecture directly
+  learning_rate: 5.0e-04    # found by find_lr at hidden_size=16/batch_size=32; re-enable
+                              # find_lr if you change capacity/batch_size meaningfully
+  val_full_data: true       # cutoff only reserves prediction_length=5 rows — too thin to
+                             # form real encoder+prediction windows; validate on everything
+                             # instead of a near-empty held-out tail (small daily data)
+  val_predict_mode: false
+
+  # simple_daily_model.py ONLY. Same meaning as under hourly: above.
+  spread_weight: 0.0
+  strength_weight: 0.0

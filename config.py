@@ -14,7 +14,7 @@ def _load_section(section: str, yaml_path: Path = CONFIG_YAML) -> dict:
 
 @dataclass
 class _BaseConfig:
-    """Shared hyperparameters for the hourly TFT config.
+    """Shared hyperparameters for the hourly and daily configs.
 
     Feature lists (targets, real_known, real_unknown, categorical) and all
     sequence/training parameters are loaded from train_config.yaml by
@@ -108,3 +108,23 @@ class HourlyConfig(_BaseConfig):
 
     def training_cutoff(self, max_idx: int) -> int:
         return max_idx - 2 * (self.encoder_length + self.prediction_length)
+
+
+@dataclass
+class DailyConfig(_BaseConfig):
+    data_path: str = 'training_data/daily_database.csv'
+    checkpoint_suffix: str = 'Daily'
+
+    encoder_length: int = 5
+    prediction_length: int = 5
+    min_encoder_length: int = 2
+    min_prediction_length: int = 1
+
+    max_epochs: int = 300  # fallback only — set explicitly in train_config.yaml's daily: section
+
+    @classmethod
+    def from_yaml(cls, yaml_path: Path = CONFIG_YAML) -> 'DailyConfig':
+        return cls._from_yaml('daily', yaml_path)
+
+    def training_cutoff(self, max_idx: int) -> int:
+        return max_idx - self.prediction_length
