@@ -26,11 +26,28 @@ from pytorch_forecasting import TimeSeriesDataSet
 
 from config import DailyConfig, HourlyConfig
 from tft_model import tft_with_ignore
-from update_data import get_conditions_table_daily, get_conditions_table_hourly
+from update_data import _DB_COL_RENAME, get_conditions_table_daily, get_conditions_table_hourly
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY'))
 TZ = pytz.timezone('America/Vancouver')
+
+# The website consuming forecasts/hourly_speed_predictions.{csv,json} expects
+# the pre-squamish*-rename column names (e.g. `speed`, not `squamishSpeed`) —
+# the exact inverse of update_data.py's _DB_COL_RENAME, so build it from that
+# single source of truth rather than hardcoding a second copy.
+_OUTPUT_COL_RENAME = {v: k for k, v in _DB_COL_RENAME.items()}
+
+# Same idea for forecasts/daily_speed_predictions.{csv,json} — the website
+# expects the pipeline's pre-rebuild field names. speed_steadiness/
+# direction_steadiness are the same underlying scores as the old speed_score/
+# direction_score, just renamed across a pipeline rebuild; hours_above_20 has
+# no current equivalent at all and is simply absent from `cols` below.
+_DAILY_OUTPUT_COL_RENAME = {
+    **_OUTPUT_COL_RENAME,
+    'speed_steadiness': 'speed_score',
+    'direction_steadiness': 'direction_score',
+}
 
 _hcfg = HourlyConfig.from_yaml()
 _dcfg = DailyConfig.from_yaml()
@@ -138,6 +155,7 @@ def run_hourly(update: bool = True, skip_features: frozenset = frozenset()) -> N
         df_t = _predict_hourly_target(data, target)
         df_out = df_t if df_out.empty else df_out.merge(df_t, on='datetime', how='outer')
     df_out = df_out[['datetime'] + _hcfg.targets]
+    df_out = df_out.rename(columns=_OUTPUT_COL_RENAME)
     df_out.to_csv(WORKING_DIR / 'forecasts' / 'hourly_speed_predictions.csv', index=False)
     df_out.to_json(WORKING_DIR / 'forecasts' / 'hourly_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Hourly forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
@@ -218,6 +236,7 @@ def run_daily(update: bool = True, skip_features: frozenset = frozenset()) -> No
         return
     cols = [c for c in _dcfg.targets if c in df_out.columns]
     df_out = df_out[['datetime'] + cols]
+    df_out = df_out.rename(columns=_DAILY_OUTPUT_COL_RENAME)
     df_out.to_csv(WORKING_DIR / 'forecasts' / 'daily_speed_predictions.csv', index=False)
     df_out.to_json(WORKING_DIR / 'forecasts' / 'daily_speed_predictions.json', orient='records', lines=True, date_format='iso')
     print(f'Daily forecast complete at {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}')
