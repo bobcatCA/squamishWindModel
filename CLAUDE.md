@@ -46,6 +46,8 @@ python forecast.py --skip-features comoxHum,pamHum,vancouverHum
     # encoder-window gap instead of failing (e.g. a feature whose live capture just started,
     # like Hum right after the DB migration — see Hourly's Key modules note below). Scoped
     # ONLY to the columns you name; a gap in anything else still fails loudly as normal.
+python forecast.py --no-update          # skip update_db() (the EC + SWS scrape), predict from the DB as-is —
+                                         # for a cron setup where a separate job already refreshes the DB
 ```
 
 `collect_data.py`'s EC bulk-download path validates rather than trusting each monthly CSV blindly, mirroring the same philosophy as the live daily-forecast scrape (see Daily below): `_fetch_station_month()` checks the response looks EC-shaped before parsing AND that the parsed columns are actually present (retrying up to 3x, then giving up and returning empty — callers just skip that month); `_blank_implausible_temps()` blanks any `Temp (°C)` value outside -40..50°C (catches a value that's numeric but wrong, which `pd.to_numeric(errors='coerce')` alone can't); `_sparse_months()` flags any calendar month with <50% non-`NaN` temperature coverage. `--ec-update` treats a sparse *recent* month as retry-worthy (EC likely hasn't finished publishing it yet) and re-fetches it within the same run; `--ec-only`'s full rebuild only reports sparse months found across the whole history, since retrying already-settled old data is unlikely to change anything — a genuine gap in EC's own records needs a human to investigate, not a retry loop.
@@ -89,7 +91,7 @@ Dataset metadata naming: `models/{target}_training_dataset_hourly.pkl` / `models
 ```
 Environment Canada + Squamish Windsports
     ↓ (collect_data.py — historical; ec_scrape.py + sws_pull.py — live)
-web_data/{station}.csv + web_data/sws_wind_database.csv + web_data/weather_data_hourly.db
+web_data/{station}.csv + web_data/sws_wind_database.csv + weather_data_hourly.db
     ↓ (build_dataset.py --mode hourly)
 training_data/hourly_database.csv
     ↓ (tft_model.py --train)                    ↓ (build_dataset.py --mode daily — derives ONLY from hourly_database.csv, no raw web_data/ reads)

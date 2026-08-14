@@ -25,7 +25,7 @@ DAILY_HOUR = 14  # matches build_dataset.py / tft_daily_model.py — the 2pm dai
 
 
 def _db_path() -> Path:
-    return Path(os.getenv('WORKING_DIRECTORY')) / 'web_data' / 'weather_data_hourly.db'
+    return Path(os.getenv('WORKING_DIRECTORY')) / 'weather_data_hourly.db'
 
 
 _DB_COL_RENAME = {

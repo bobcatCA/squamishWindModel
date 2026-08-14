@@ -28,7 +28,7 @@ from tft_model import _apply_mask_intervals
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
-DB_PATH    = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
+DB_PATH    = WORKING_DIR / 'weather_data_hourly.db'
 MODEL_PATH = WORKING_DIR / 'models' / 'simple_nn_daily.pt'
 
 DAILY_HOUR = 14  # matches build_dataset.py's DAILY_HOUR

@@ -253,10 +253,16 @@ if __name__ == '__main__':
                          'with 0 instead of failing on an encoder-window gap — temporary bridging '
                          'override for a feature that does not have enough history yet. Scoped '
                          'ONLY to the named columns; everything else still fails loudly on a gap.')
+    p.add_argument('--no-update', action='store_true',
+                    help='Skip update_db() (the EC + SWS scrape) and predict from whatever is '
+                         'already in the DB — for a cron setup where a separate scheduled job '
+                         'already refreshes the DB, so the forecast step does not re-scrape '
+                         '(SWS in particular is a slow Selenium+Chrome pull).')
     args = p.parse_args()
     skip_features = frozenset(f.strip() for f in args.skip_features.split(',') if f.strip())
+    update = not args.no_update
 
     if args.mode in ('hourly', 'both'):
-        run_hourly(skip_features=skip_features)
+        run_hourly(update=update, skip_features=skip_features)
     if args.mode in ('daily', 'both'):
-        run_daily(skip_features=skip_features)
+        run_daily(update=update, skip_features=skip_features)

@@ -30,7 +30,7 @@ from tft_model import _apply_mask_intervals
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
-DB_PATH    = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
+DB_PATH    = WORKING_DIR / 'weather_data_hourly.db'
 MODEL_PATH = WORKING_DIR / 'models' / 'simple_nn_hourly.pt'
 
 # normalize_sky_series buckets every raw EC condition string into exactly these.

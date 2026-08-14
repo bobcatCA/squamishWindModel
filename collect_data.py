@@ -306,7 +306,7 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
 
 def init_db(db_path: Path = None) -> None:
     if db_path is None:
-        db_path = Path(os.getenv('WORKING_DIRECTORY', '.')) / 'web_data' / 'weather_data_hourly.db'
+        db_path = Path(os.getenv('WORKING_DIRECTORY', '.')) / 'weather_data_hourly.db'
     with sqlite3.connect(db_path) as conn:
         conn.execute(_CREATE_WEATHER)
         migrate_schema(conn)

@@ -33,7 +33,7 @@ from ec_scrape import normalize_sky_series
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
-DB_PATH    = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
+DB_PATH    = WORKING_DIR / 'weather_data_hourly.db'
 
 
 class tft_with_ignore(TemporalFusionTransformer):

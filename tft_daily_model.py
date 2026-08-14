@@ -49,7 +49,7 @@ from tft_model import _apply_mask_intervals, _build_dataset, tft_with_ignore
 
 load_dotenv()
 WORKING_DIR = Path(os.getenv('WORKING_DIRECTORY', '.'))
-DB_PATH    = WORKING_DIR / 'web_data' / 'weather_data_hourly.db'
+DB_PATH    = WORKING_DIR / 'weather_data_hourly.db'
 DAILY_HOUR = 14  # matches build_dataset.py's DAILY_HOUR
 
 # Targets that only exist in the daily-built CSV (steadiness scores are
