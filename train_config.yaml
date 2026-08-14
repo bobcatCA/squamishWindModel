@@ -161,7 +161,6 @@ daily:
     #- ballenasDegC
     - comoxDegC
     - lillooetDegC
-    - pamDegC
     - pembertonDegC
     - vancouverDegC
     - whistlerDegC
@@ -176,6 +175,7 @@ daily:
     - comoxHum
     - comoxKPa
     - lillooetKPa
+    - pamDegC
     #- pamHum
     - pamKPa
     - pembertonKPa

@@ -139,19 +139,22 @@ def pull_past_hrs_weather() -> pd.DataFrame:
         press_col = _find_col('Press', cols, prefer='kPa')
         temp_col  = _find_col('Temp', cols, prefer='C')
         cond_col  = _find_col('Condition', cols)
+        hum_col   = _find_col('Humidity', cols)
 
         df_station = df_station.rename(columns={
             date_col:  'datetime',
             cond_col:  f'{station}Sky',
             press_col: f'{station}KPa',
             temp_col:  f'{station}DegC',
+            hum_col:   f'{station}Hum',
         })
         df_station = _attach_dates(df_station, day_row_index)
-        df_station = df_station[['datetime', f'{station}Sky', f'{station}KPa', f'{station}DegC']]
+        df_station = df_station[['datetime', f'{station}Sky', f'{station}KPa', f'{station}DegC', f'{station}Hum']]
 
         df_station[f'{station}DegC'] = df_station[f'{station}DegC'].apply(_extract_bracket_value)
         df_station[f'{station}DegC'] = pd.to_numeric(df_station[f'{station}DegC'], errors='coerce')
         df_station[f'{station}KPa']  = pd.to_numeric(df_station[f'{station}KPa'],  errors='coerce')
+        df_station[f'{station}Hum']  = pd.to_numeric(df_station[f'{station}Hum'],  errors='coerce')
 
         df_all = df_station if df_all.empty else df_all.merge(df_station, on='datetime', how='inner')
 

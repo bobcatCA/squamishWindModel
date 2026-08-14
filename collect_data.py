@@ -43,6 +43,15 @@ EC_STATIONS = {
 
 EC_START = 'Jan2016'
 
+# Same rationale as update_data.py's _PLAUSIBLE_DEGC_RANGE: wide enough to
+# never flag real weather, tight enough to catch a value that's numeric but
+# wrong (e.g. an EC placeholder/sentinel) — pd.to_numeric(errors='coerce')
+# only catches values that aren't numbers at all, not ones that are numbers
+# but nonsense.
+_PLAUSIBLE_DEGC_RANGE = (-40, 50)
+
+_REQUIRED_EC_COLUMNS = ['Date/Time (LST)', 'Temp (°C)']
+
 
 def _fetch_station_month(station_id: int, year: int, month: int,
                           retries: int = 3) -> pd.DataFrame:
@@ -56,13 +65,42 @@ def _fetch_station_month(station_id: int, year: int, month: int,
             resp.raise_for_status()
             if b'Date/Time' not in resp.content[:500]:
                 raise ValueError(f'Unexpected response: {resp.content[:100]}')
-            return pd.read_csv(StringIO(resp.content.decode('utf-8-sig')))
+            df = pd.read_csv(StringIO(resp.content.decode('utf-8-sig')))
+            missing = [c for c in _REQUIRED_EC_COLUMNS if c not in df.columns]
+            if missing:
+                # The raw-bytes sniff above only checks the response looks
+                # roughly EC-shaped before parsing; this catches a CSV that
+                # parsed fine but doesn't actually have the columns we need
+                # (e.g. EC changed the header format).
+                raise ValueError(f'Parsed CSV missing columns {missing}')
+            return df
         except Exception as exc:
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
             else:
                 print(f'    Warning: failed after {retries} attempts — {exc}')
     return pd.DataFrame()
+
+
+def _blank_implausible_temps(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    bad = df['Temp (°C)'].notna() & ~df['Temp (°C)'].between(*_PLAUSIBLE_DEGC_RANGE)
+    if bad.any():
+        print(f'    Warning: {label} has {int(bad.sum())} implausible Temp (°C) value(s) '
+              f'(outside {_PLAUSIBLE_DEGC_RANGE}) — blanking to NaN')
+        df.loc[bad, 'Temp (°C)'] = pd.NA
+    return df
+
+
+def _sparse_months(df: pd.DataFrame, threshold: float = 0.5) -> pd.PeriodIndex:
+    """Return the calendar months where Temp (°C) completeness is below
+    *threshold* — EC's bulk endpoint sometimes serves a shaped-correctly but
+    mostly/entirely-empty CSV for a month instead of erroring, which neither
+    the response-format check nor the plausibility check catches (an absent
+    reading isn't an implausible one)."""
+    tmp = df[['Date/Time (LST)', 'Temp (°C)']].copy()
+    tmp['_month'] = tmp['Date/Time (LST)'].dt.to_period('M')
+    completeness = tmp.groupby('_month')['Temp (°C)'].apply(lambda x: x.notna().mean())
+    return completeness[completeness < threshold].index
 
 
 def download_ec_history(end: str = None) -> None:
@@ -90,6 +128,19 @@ def download_ec_history(end: str = None) -> None:
         out = pd.concat(frames, ignore_index=True)
         out['Date/Time (LST)'] = pd.to_datetime(out['Date/Time (LST)'])
         out['Temp (°C)'] = pd.to_numeric(out['Temp (°C)'], errors='coerce')
+        out = _blank_implausible_temps(out, f'{name}.csv')
+
+        # Full rebuild covers years of already-published EC data, so unlike
+        # update_ec_history's recent-months check (where sparseness likely
+        # just means EC hasn't finished publishing that month yet, and
+        # re-fetching the same run fixes it), a sparse month found here is
+        # more likely a genuine permanent gap in EC's records — report it
+        # rather than assume a retry would help.
+        sparse = _sparse_months(out)
+        if not sparse.empty:
+            print(f'  Warning: sparse Temp (°C) coverage (<50%) in {len(sparse)} month(s): '
+                  f'{[str(m) for m in sparse]}')
+
         out.to_csv(f'web_data/{name}.csv', index=False)
         print(f'  Saved web_data/{name}.csv  ({len(out):,} rows)')
 
@@ -118,16 +169,14 @@ def update_ec_history(end: str = None) -> None:
 
         # Scan the most recent 4 months for sparse/placeholder months (< 50% non-NaN
         # temperature) and strip those rows so they get cleanly re-fetched below.
-        recent_start = start_dt - pd.DateOffset(months=3)
-        recent_rows  = existing[existing['Date/Time (LST)'] >= recent_start].copy()
-        recent_rows['_month'] = recent_rows['Date/Time (LST)'].dt.to_period('M')
-        completeness = recent_rows.groupby('_month')['Temp (°C)'].apply(
-            lambda x: x.notna().mean()
-        )
+        # (Unlike download_ec_history's full-history check, sparseness here is
+        # treated as fixable-by-retry: a recent month is plausibly just not
+        # fully published by EC yet, so exclude the still-in-progress current
+        # month and re-fetch the rest within this same run.)
+        recent_start   = start_dt - pd.DateOffset(months=3)
         current_period = pd.Timestamp.now().to_period('M')
-        sparse = completeness[
-            (completeness < 0.5) & (completeness.index < current_period)
-        ].index
+        sparse = _sparse_months(existing[existing['Date/Time (LST)'] >= recent_start])
+        sparse = sparse[sparse < current_period]
         if not sparse.empty:
             first_sparse = sparse.min().to_timestamp()
             drop_mask = existing['Date/Time (LST)'].dt.to_period('M').isin(sparse)
@@ -152,6 +201,7 @@ def update_ec_history(end: str = None) -> None:
         new_data = pd.concat(frames, ignore_index=True)
         new_data['Date/Time (LST)'] = pd.to_datetime(new_data['Date/Time (LST)'])
         new_data['Temp (°C)'] = pd.to_numeric(new_data['Temp (°C)'], errors='coerce')
+        new_data = _blank_implausible_temps(new_data, f'{name}.csv (incremental)')
 
         combined = (
             pd.concat([existing, new_data], ignore_index=True)
@@ -192,18 +242,66 @@ def download_sws_history(start: str = SWS_START, end: str = None) -> None:
 _CREATE_WEATHER = """
 CREATE TABLE IF NOT EXISTS weather (
     datetime      INTEGER PRIMARY KEY,
-    ballenasDegC  REAL, ballenasKPa   REAL,
-    comoxDegC     REAL, comoxKPa      REAL, comoxSky      TEXT,
-    lillooetDegC  REAL, lillooetKPa   REAL,
-    pamDegC       REAL, pamKPa        REAL,
-    pembertonDegC REAL, pembertonKPa  REAL,
-    vancouverDegC REAL, vancouverKPa  REAL, vancouverSky  TEXT,
-    victoriaDegC  REAL, victoriaKPa   REAL, victoriaSky   TEXT,
-    whistlerDegC  REAL, whistlerKPa   REAL, whistlerSky   TEXT,
+    ballenasDegC  REAL, ballenasKPa   REAL, ballenasHum   REAL,
+    comoxDegC     REAL, comoxKPa      REAL, comoxHum      REAL, comoxSky      TEXT,
+    lillooetDegC  REAL, lillooetKPa   REAL, lillooetHum   REAL,
+    pamDegC       REAL, pamKPa        REAL, pamHum        REAL,
+    pembertonDegC REAL, pembertonKPa  REAL, pembertonHum  REAL,
+    vancouverDegC REAL, vancouverKPa  REAL, vancouverHum  REAL, vancouverSky  TEXT,
+    victoriaDegC  REAL, victoriaKPa   REAL, victoriaHum   REAL, victoriaSky   TEXT,
+    whistlerDegC  REAL, whistlerKPa   REAL, whistlerHum   REAL, whistlerSky   TEXT,
     squamishSpeed REAL, squamishGust   REAL, squamishLull  REAL,
     squamishDirection REAL, squamishDegC REAL
 )
 """
+
+# All 8 stations scraped by ec_scrape.pull_past_hrs_weather().
+_HUM_STATIONS = ['ballenas', 'comox', 'lillooet', 'pam', 'pemberton', 'vancouver', 'victoria', 'whistler']
+
+
+def _migrate_add_hum_columns(conn: sqlite3.Connection) -> None:
+    """Add {station}Hum columns to a pre-existing `weather` table that predates
+    humidity capture. No-op (and no data loss) if they're already there —
+    ALTER TABLE ADD COLUMN only appends NULLs for existing rows, it never
+    touches prior data."""
+    existing = {row[1] for row in conn.execute('PRAGMA table_info(weather)')}
+    for station in _HUM_STATIONS:
+        col = f'{station}Hum'
+        if col not in existing:
+            conn.execute(f'ALTER TABLE weather ADD COLUMN {col} REAL')
+
+
+# The SWS sensor columns' pre-rename names (see git history: "Rename SWS
+# columns in SQLite DB to squamish* convention"). A `weather` table copied in
+# from a deployment running older code (e.g. the Raspberry Pi) may still be
+# on this naming.
+_LEGACY_SWS_RENAME = {
+    'speed':       'squamishSpeed',
+    'gust':        'squamishGust',
+    'lull':        'squamishLull',
+    'direction':   'squamishDirection',
+    'temperature': 'squamishDegC',
+}
+
+
+def _migrate_rename_legacy_sws_columns(conn: sqlite3.Connection) -> None:
+    """Rename a pre-migration `weather` table's raw SWS column names to the
+    current squamish* convention. Safe/idempotent — RENAME COLUMN preserves
+    every existing value, it only relabels the column, and this only fires
+    for a column still under its old name."""
+    existing = {row[1] for row in conn.execute('PRAGMA table_info(weather)')}
+    for old, new in _LEGACY_SWS_RENAME.items():
+        if old in existing and new not in existing:
+            conn.execute(f'ALTER TABLE weather RENAME COLUMN {old} TO {new}')
+
+
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    """Bring an existing `weather` table up to the current schema in place.
+    Safe to call on every DB touch, not just --init-db — a DB file copied in
+    from another deployment (different code version, e.g. the Pi) can be on
+    an older schema at any time, not only at first-time setup."""
+    _migrate_add_hum_columns(conn)
+    _migrate_rename_legacy_sws_columns(conn)
 
 
 def init_db(db_path: Path = None) -> None:
@@ -211,6 +309,7 @@ def init_db(db_path: Path = None) -> None:
         db_path = Path(os.getenv('WORKING_DIRECTORY', '.')) / 'web_data' / 'weather_data_hourly.db'
     with sqlite3.connect(db_path) as conn:
         conn.execute(_CREATE_WEATHER)
+        migrate_schema(conn)
         conn.commit()
     print(f'Initialised {db_path}')
 

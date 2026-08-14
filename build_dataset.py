@@ -107,9 +107,18 @@ def wind_to_hourly_index(df_wind: pd.DataFrame, hourly_index: pd.DatetimeIndex,
     directly, so DST transitions can't shift a reading into the wrong bin.
     """
     hours = pd.DataFrame({'datetime': pd.DatetimeIndex(hourly_index).sort_values().unique()})
-    hours['hour'] = hours['datetime']
-
     wind = df_wind.sort_index().reset_index()
+
+    # merge_asof (unlike a plain .merge()) requires the merge key to have
+    # identical datetime64 resolution on both sides. SWS's epoch-seconds
+    # parse (sws_pull.py, pd.to_datetime(..., unit='s')) and EC's
+    # string-parsed timestamps can land at different resolutions even
+    # though both are correctly tz-aware 'America/Vancouver' — normalize
+    # before merging rather than requiring every caller to know this.
+    hours['datetime'] = hours['datetime'].dt.as_unit('us')
+    wind['datetime']  = wind['datetime'].dt.as_unit('us')
+
+    hours['hour'] = hours['datetime']
     matched = pd.merge_asof(wind, hours, on='datetime', direction='nearest', tolerance=tolerance)
     matched = matched.dropna(subset=['hour'])
 
@@ -210,9 +219,19 @@ def _to_5_score(value: pd.Series, low: float, high: float) -> pd.Series:
     return np.clip(5 - 5 * (value - low) / (high - low), 0, 5)
 
 
-def _sailable_hours(hourly_path: str) -> pd.DataFrame:
+def _load_hourly(hourly: pd.DataFrame = None, hourly_path: str = None) -> pd.DataFrame:
+    """Load raw hourly data from an in-memory DataFrame (e.g. live DB rows) if
+    given, else from a CSV path — the two add_*_steadiness() functions below
+    need the same raw hourly squamish* columns either way, they just don't
+    care where those came from."""
+    if hourly is not None:
+        return hourly.copy()
+    return pd.read_csv(hourly_path)
+
+
+def _sailable_hours(hourly: pd.DataFrame = None, hourly_path: str = None) -> pd.DataFrame:
     """Hourly rows where squamishSpeed > STEADINESS_MIN_SPEED, with a 'date' column."""
-    hourly = pd.read_csv(hourly_path)
+    hourly = _load_hourly(hourly, hourly_path)
     hourly['datetime'] = pd.to_datetime(hourly['datetime'], utc=True).dt.tz_convert('America/Vancouver')
     hourly['date'] = hourly['datetime'].dt.date
     return hourly[hourly['squamishSpeed'] > STEADINESS_MIN_SPEED].copy()
@@ -226,28 +245,37 @@ def _daily_score(df: pd.DataFrame, daily_value: pd.Series, low: float, high: flo
     return df
 
 
-def add_speed_steadiness(df: pd.DataFrame, hourly_path: str = 'training_data/hourly_database.csv') -> pd.DataFrame:
+def add_speed_steadiness(df: pd.DataFrame, hourly_path: str = 'training_data/hourly_database.csv',
+                          hourly: pd.DataFrame = None) -> pd.DataFrame:
     """Score 0-5 (5=steadiest) from the gust/lull spread relative to speed:
     (squamishGust - squamishLull) / squamishSpeed, averaged over each day's
     sailable hours (squamishSpeed > STEADINESS_MIN_SPEED) from the hourly
     dataset — NOT just the daily row's own 2pm reading. Days with no sailable
     hours score 0.
+
+    *hourly*, if given, is used instead of reading hourly_path — lets a caller
+    with live DB rows (not the training CSV) reuse this exact formula. Must
+    have squamishSpeed/Gust/Lull/datetime columns.
     """
-    sailable = _sailable_hours(hourly_path)
+    sailable = _sailable_hours(hourly, hourly_path)
     sailable['gustiness'] = (sailable['squamishGust'] - sailable['squamishLull']) / sailable['squamishSpeed']
     daily_gustiness = sailable.groupby('date')['gustiness'].mean()
     return _daily_score(df, daily_gustiness, SPEED_STEADINESS_LOW, SPEED_STEADINESS_HIGH, 'speed_steadiness')
 
 
-def add_direction_steadiness(df: pd.DataFrame, hourly_path: str = 'training_data/hourly_database.csv') -> pd.DataFrame:
+def add_direction_steadiness(df: pd.DataFrame, hourly_path: str = 'training_data/hourly_database.csv',
+                              hourly: pd.DataFrame = None) -> pd.DataFrame:
     """Score 0-5 (5=steadiest) from how much squamishDirection varies over each
     day's sailable hours (squamishSpeed > STEADINESS_MIN_SPEED), using CIRCULAR
     variance (1 - mean resultant length) rather than a plain std — direction
     wraps at 360°, so e.g. 350° and 10° are 20° apart, not ~340°. Days with
     fewer than DIRECTION_MIN_SAILABLE_HOURS sailable hours score 0 (a single
     reading has no measurable spread).
+
+    *hourly*, if given, is used instead of reading hourly_path — see
+    add_speed_steadiness.
     """
-    sailable = _sailable_hours(hourly_path)
+    sailable = _sailable_hours(hourly, hourly_path)
 
     def circular_variance(deg: pd.Series) -> float:
         rad = np.radians(deg)
