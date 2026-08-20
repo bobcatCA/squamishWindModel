@@ -42,52 +42,39 @@ hourly:
   data_path: training_data/hourly_database.csv
 
   # Sequence lengths
-  encoder_length: 2        # hours of history to feed in
-  prediction_length: 8      # hours ahead to forecast
-  min_encoder_length: 1    # shortest encoder window allowed during training
-  min_prediction_length: 8
+  encoder_length: 6        # hours of history to feed in
+  prediction_length: 6      # hours ahead to forecast
+  min_encoder_length: 5    # shortest encoder window allowed during training
+  min_prediction_length: 6
 
   # Wind variables to predict (one model trained per target)
   targets:
     - squamishSpeed
 
-  # Features known for the full forecast window (from EC 6-day forecast)
   real_known:
-    # Temperatures: feature selection (rounds 1–3) showed adding EC temps consistently
-    # hurts at production epoch counts — pressures alone generalise better.
-    # - lillooetDegC
-    # - pembertonDegC
-    # - vancouverDegC
-    # - victoriaDegC
-    # - whistlerDegC
-    # - comoxDegC
-
+  # None for the hourly model
+    
   # Features only available in the past (measured, not forecast)
   real_unknown:
     - ballenasDegC
     - ballenasKPa
     - comoxDegC
-    - comoxHum
+    #- comoxHum
     - comoxKPa
     - lillooetDegC
-    - lillooetKPa
+    #- lillooetKPa
     - pamDegC
-    - pamHum
+    #- pamHum
     - pamKPa
     - pembertonDegC
-    - pembertonKPa
-    - squamishDegC
+    #- pembertonKPa
+    #- squamishDegC
     #- squamishDirection
     - vancouverDegC
-    - vancouverHum
+    #- vancouverHum
     - vancouverKPa
     - whistlerDegC    
-    - whistlerKPa
-    
-    # - ballenasKPa     # 8.6% NaN — usable but not needed
-    # - whistlerKPa     # 33.6% NaN — too sparse
-    # - pembertonKPa    # 19.6% NaN — too sparse
-    # - temperature     # local SWS sensor
+    #- whistlerKPa
 
   # Categorical features (must be strings in the CSV)
   categorical:
@@ -99,14 +86,15 @@ hourly:
   # Model architecture
   hidden_size: 64
   attention_head_size: 4
-  dropout: 0.1
+  dropout: 0.2
   hidden_continuous_size: 32
-  output_size: 7            # quantile outputs: Q10 Q20 Q30 Q40 Q50 Q60 Q70 Q80 Q90
+  output_size: 1            # single point forecast (RMSE loss) — not read by tft_model.py,
+                             # which always trains with output_size=1; kept for reference only
 
   # Training
-  max_epochs: 10
+  max_epochs: 20
   batch_size: 128
-  gradient_clip_val: 0.1
+  gradient_clip_val: 1.0
   accelerator: cpu
   optimizer: adam
   find_lr: true

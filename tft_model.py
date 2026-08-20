@@ -25,7 +25,7 @@ import yaml
 from dotenv import load_dotenv
 from lightning.pytorch import Trainer
 from lightning.pytorch.tuner import Tuner
-from pytorch_forecasting import QuantileLoss, RMSE, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting import RMSE, TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
 
 from config import CONFIG_YAML, HourlyConfig
@@ -167,8 +167,8 @@ def train(epochs: int = None) -> None:
         attention_head_size=cfg.attention_head_size,
         dropout=cfg.dropout,
         hidden_continuous_size=cfg.hidden_continuous_size,
-        output_size=cfg.output_size,
-        loss=QuantileLoss(),
+        output_size=1,
+        loss=RMSE(),
         logging_metrics=[],
         log_interval=10,
         reduce_on_plateau_patience=4,
@@ -229,10 +229,16 @@ def _load_test_df(cfg: HourlyConfig, start_ts: pd.Timestamp, source: str,
     return df
 
 
-def test(start: str = None, end: str = None, save: bool = False, source: str = 'db') -> None:
+def test(start: str = None, end: str = None, save: bool = False, source: str = 'db',
+         horizons: tuple = (1, 4)) -> None:
     cfg = HourlyConfig.from_yaml()
     target = cfg.targets[0]
     model, training_dataset = _load_model_and_dataset(target)
+
+    horizons = tuple(sorted(set(horizons)))
+    bad = [h for h in horizons if h < 1 or h > cfg.prediction_length]
+    if bad:
+        raise ValueError(f'--horizons {bad} out of range 1..{cfg.prediction_length}')
 
     start_ts = (
         pd.Timestamp(start, tz='America/Vancouver') if start
@@ -245,12 +251,15 @@ def test(start: str = None, end: str = None, save: bool = False, source: str = '
     df['static'] = 'S'
     df['time_idx'] = np.arange(len(df))
 
+    # Rolling window (stride=1): a fresh forecast is issued at every hour, and for each
+    # requested horizon we keep only the single step that horizon actually predicts —
+    # e.g. horizon=4 keeps only the "4 hours from when this forecast was made" value,
+    # never a mix of 1h/2h/.../8h-ahead values stitched together.
     window_size = cfg.encoder_length + cfg.prediction_length
-    stride = cfg.prediction_length
-    n_windows = max(0, (len(df) - window_size) // stride + 1)
+    n_windows = max(0, len(df) - window_size + 1)
     records = []
 
-    for w, start_idx in enumerate(range(0, len(df) - window_size + 1, stride)):
+    for w, start_idx in enumerate(range(n_windows)):
         window = df.iloc[start_idx: start_idx + window_size].copy().reset_index(drop=True)
         window['time_idx'] = window.index
         try:
@@ -262,16 +271,15 @@ def test(start: str = None, end: str = None, save: bool = False, source: str = '
             pred_start = int(raw.index['time_idx'].max())
             n_quantiles = raw.output.prediction.shape[-1]
             med_idx = n_quantiles // 2
-            lo_idx, hi_idx = med_idx - 1, med_idx + 1
-            for step in range(cfg.prediction_length):
+            for h in horizons:
+                step = h - 1
                 row_idx = pred_start + step
                 if row_idx >= len(window):
                     continue
                 records.append({
                     'datetime': window['datetime'].iloc[row_idx],
+                    'horizon': h,
                     'pred': float(raw.output.prediction[0, step, med_idx]),
-                    'pred_lo': float(raw.output.prediction[0, step, lo_idx]),
-                    'pred_hi': float(raw.output.prediction[0, step, hi_idx]),
                 })
         except Exception:
             pass
@@ -279,28 +287,31 @@ def test(start: str = None, end: str = None, save: bool = False, source: str = '
             print(f'  {w + 1}/{n_windows}', end='\r', flush=True)
     print()
 
-    preds = pd.DataFrame(records).drop_duplicates(subset='datetime').sort_values('datetime')
-    merged = df[['datetime', target]].merge(preds, on='datetime', how='inner')
-    if merged.empty:
+    if not records:
         print('No predictions produced — check that the model/dataset match the current feature config.')
         return
-
-    actual = merged[target].values
-    pred = merged['pred'].values
-    mae = np.mean(np.abs(pred - actual))
-    rmse = np.sqrt(np.mean((pred - actual) ** 2))
-    print(f'source={source}  {len(merged):,} predicted rows from {merged["datetime"].min()} → {merged["datetime"].max()}')
-    print(f'MAE={mae:.2f}  RMSE={rmse:.2f}  (actual mean={actual.mean():.2f}, max={actual.max():.2f})')
-
-    q = QuantileLoss().quantiles
-    med_idx = len(q) // 2
-    lo_q, hi_q = q[med_idx - 1], q[med_idx + 1]
+    preds = pd.DataFrame(records).drop_duplicates(subset=['datetime', 'horizon']).sort_values('datetime')
 
     fig, ax = plt.subplots(figsize=(16, 5))
     ax.plot(df['datetime'], df[target], color='#333333', linewidth=0.8, alpha=0.5, label='actual')
-    ax.fill_between(merged['datetime'], merged['pred_lo'], merged['pred_hi'],
-                     color='#1f77b4', alpha=0.15, label=f'Q{lo_q:.2f}–Q{hi_q:.2f}')
-    ax.plot(merged['datetime'], merged['pred'], color='#1f77b4', linewidth=1.1, alpha=0.9, label='predicted (median)')
+
+    colors = plt.get_cmap('tab10').colors
+    for i, h in enumerate(horizons):
+        merged = df[['datetime', target]].merge(preds[preds['horizon'] == h], on='datetime', how='inner')
+        if merged.empty:
+            print(f'horizon={h}h: no predictions produced')
+            continue
+        actual = merged[target].values
+        pred = merged['pred'].values
+        mae = np.mean(np.abs(pred - actual))
+        rmse = np.sqrt(np.mean((pred - actual) ** 2))
+        print(f'horizon={h}h  source={source}  {len(merged):,} rows from {merged["datetime"].min()} → {merged["datetime"].max()}')
+        print(f'  MAE={mae:.2f}  RMSE={rmse:.2f}  (actual mean={actual.mean():.2f}, max={actual.max():.2f})')
+
+        color = colors[i % len(colors)]
+        ax.plot(merged['datetime'], merged['pred'], color=color, linewidth=1.1, alpha=0.9,
+                label=f'{h}h ahead (median)')
+
     ax.set_ylabel(target)
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.2)
@@ -327,6 +338,11 @@ if __name__ == '__main__':
                    help='Where --test pulls data from: live SQLite DB (default), or the full '
                         'training CSV — use csv for features not in the live DB')
     p.add_argument('--save', action='store_true', help='Save plot to forecasts/ instead of showing it')
+    p.add_argument('--horizons', default='1,4',
+                   help='Comma-separated forecast horizons (hours ahead) to plot, e.g. "1,4". Each '
+                        'window predicts a fixed distance ahead — no mixing of horizons within a line. '
+                        'Uses a rolling (stride=1) window, so this is slower than a single pass; use '
+                        '--start/--end to bound the date range if it takes too long.')
     args = p.parse_args()
 
     run_train = args.train or not (args.train or args.test)
@@ -335,4 +351,5 @@ if __name__ == '__main__':
     if run_train:
         train(epochs=args.epochs)
     if run_test:
-        test(start=args.start, end=args.end, save=args.save, source=args.source)
+        horizons = tuple(int(h) for h in args.horizons.split(','))
+        test(start=args.start, end=args.end, save=args.save, source=args.source, horizons=horizons)
