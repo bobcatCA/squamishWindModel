@@ -128,7 +128,11 @@ def _prepare_hourly(update: bool = True, skip_features: frozenset = frozenset())
 
 
 def _predict_hourly_target(data: pd.DataFrame, target: str,
-                            forecast_q: int = 4) -> pd.DataFrame:
+                            forecast_q: int = 0) -> pd.DataFrame:
+    # Hourly trains with RMSE (output_size=1) — a single point forecast, not
+    # quantiles, so there's only ever the one channel at index 0. Daily below
+    # still trains with QuantileLoss (output_size=7), where forecast_q=3
+    # picks the median of 7 quantiles.
     ckpt_model   = WORKING_DIR / 'models' / f'tft{target}HourlyCheckpoint.ckpt'
     ckpt_dataset = WORKING_DIR / 'models' / f'{target}_training_dataset_hourly.pkl'
     with torch.serialization.safe_globals([TimeSeriesDataSet]):
